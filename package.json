@@ -5,7 +5,16 @@
   "description": "Курсовий проєкт Node.js Pro - Marketplace API",
   "main": "app.js",
   "scripts": {
-    "start": "node app.js"
+    "start": "node app.js",
+    "lint": "redocly lint openapi/openapi.yaml",
+    "bundle": "redocly bundle openapi/openapi.yaml -o spec.json"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.22.2",
+    "express-openapi-validator": "^5.6.2"
+  },
+  "devDependencies": {
+    "@redocly/cli": "^2.46.0"
+  }
 }
