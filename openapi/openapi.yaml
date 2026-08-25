@@ -1,0 +1,300 @@
+openapi: 3.0.3
+info:
+  title: Marketplace API
+  version: 1.0.0
+  description: >
+    Курсовий проєкт Node.js Pro — API маркетплейсу: каталог товарів (products)
+    та оформлення замовлень (orders). Курсор-пагінація, Idempotency-Key на
+    створенні замовлення, помилки у форматі application/problem+json (RFC 9457).
+servers:
+  - url: http://localhost:3000
+    description: Локальний сервер розробки
+security: []
+tags:
+  - name: products
+    description: Каталог товарів
+  - name: orders
+    description: Замовлення
+
+paths:
+  /products:
+    get:
+      tags: [products]
+      operationId: listProducts
+      summary: Отримати список товарів (з курсор-пагінацією)
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Кількість елементів на сторінці (за замовчуванням 20, максимум 100).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          required: false
+          description: >
+            Непрозорий токен позиції в списку, отриманий з поля next_cursor
+            попередньої відповіді. Клієнт не повинен парсити чи формувати
+            це значення самостійно — тільки передавати як є.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Список товарів
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductListResponse'
+        '400':
+          description: Некоректний cursor або limit
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /products/{productId}:
+    get:
+      tags: [products]
+      operationId: getProduct
+      summary: Отримати товар за id
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Товар знайдено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '404':
+          description: Товар не знайдено
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /orders:
+    get:
+      tags: [orders]
+      operationId: listOrders
+      summary: Отримати список замовлень (з курсор-пагінацією)
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Кількість елементів на сторінці (за замовчуванням 20, максимум 100).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          required: false
+          description: >
+            Непрозорий токен позиції в списку, отриманий з поля next_cursor
+            попередньої відповіді.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Список замовлень
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderListResponse'
+        '400':
+          description: Некоректний cursor або limit
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+    post:
+      tags: [orders]
+      operationId: createOrder
+      summary: Оформити нове замовлення
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: >
+            Унікальний ключ, який генерує клієнт (наприклад, UUID v4) для цього
+            запиту створення замовлення. Повторний запит з тим самим ключем і
+            тим самим тілом поверне ту саму відповідь, що й перший раз (замовлення
+            не буде створено вдруге) — заголовок відповіді Idempotency-Replay: true
+            підтвердить, що це повтор. Той самий ключ з іншим тілом запиту
+            вважається помилкою клієнта.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '201':
+          description: Замовлення створено
+          headers:
+            Idempotency-Replay:
+              description: "Присутній і дорівнює true, якщо це повторний запит з тим самим ключем і тілом."
+              schema:
+                type: boolean
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          description: Не передано Idempotency-Key або тіло не пройшло валідацію
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: Той самий Idempotency-Key вже використовувався з іншим тілом запиту
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /orders/{orderId}:
+    get:
+      tags: [orders]
+      operationId: getOrder
+      summary: Отримати замовлення за id
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Замовлення знайдено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '404':
+          description: Замовлення не знайдено
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+components:
+  schemas:
+    Product:
+      type: object
+      required: [id, name, priceCents, currency]
+      properties:
+        id:
+          type: string
+          example: "p-1"
+        name:
+          type: string
+          example: "Клавіатура"
+        priceCents:
+          type: integer
+          description: Ціна товару в найменших одиницях валюти (копійках/центах), щоб уникнути помилок округлення float.
+          example: 45000
+        currency:
+          type: string
+          example: "UAH"
+
+    OrderItem:
+      type: object
+      required: [productId, quantity]
+      properties:
+        productId:
+          type: string
+          example: "p-1"
+        quantity:
+          type: integer
+          minimum: 1
+          example: 2
+
+    Order:
+      type: object
+      required: [id, items, totalCents, currency, status]
+      properties:
+        id:
+          type: string
+          example: "o-1"
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        totalCents:
+          type: integer
+          example: 90000
+        currency:
+          type: string
+          example: "UAH"
+        status:
+          type: string
+          example: "new"
+
+    CreateOrderRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/OrderItem'
+
+    ProductListResponse:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Product'
+        next_cursor:
+          type: string
+          nullable: true
+          description: Непрозорий токен наступної сторінки. null, якщо сторінок більше немає.
+
+    OrderListResponse:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Order'
+        next_cursor:
+          type: string
+          nullable: true
+          description: Непрозорий токен наступної сторінки. null, якщо сторінок більше немає.
+
+    Problem:
+      type: object
+      required: [type, title, status, detail, instance]
+      properties:
+        type:
+          type: string
+          format: uri
+          example: "https://example.com/problems/not-found"
+        title:
+          type: string
+          example: "Ресурс не знайдено"
+        status:
+          type: integer
+          example: 404
+        detail:
+          type: string
+          example: "Замовлення з id o-999 не знайдено"
+        instance:
+          type: string
+          example: "/orders/o-999"
