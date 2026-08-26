@@ -211,6 +211,7 @@ components:
     OrderItem:
       type: object
       required: [productId, quantity]
+      additionalProperties: false
       properties:
         productId:
           type: string
@@ -245,6 +246,7 @@ components:
     CreateOrderRequest:
       type: object
       required: [items]
+      additionalProperties: false
       properties:
         items:
           type: array

@@ -27,11 +27,30 @@ let products = [
 let orders = [];
 let nextOrderId = 1;
 
-// Idempotency: ключ -> { fingerprint тіла, готова відповідь }
 const idempotencyStore = new Map();
+const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000; // 24 години — стільки ж тримає ключі Stripe
+const IDEMPOTENCY_MAX_ENTRIES = 10000; // запобіжник від необмеженого росту Map
 
 function fingerprint(body) {
     return crypto.createHash('sha256').update(JSON.stringify(body ?? null)).digest('hex');
+}
+
+function getIdempotencyRecord(key) {
+    const record = idempotencyStore.get(key);
+    if (!record) return undefined;
+    if (Date.now() > record.expiresAt) {
+        idempotencyStore.delete(key);
+        return undefined;
+    }
+    return record;
+}
+
+function setIdempotencyRecord(key, value) {
+    if (idempotencyStore.size >= IDEMPOTENCY_MAX_ENTRIES && !idempotencyStore.has(key)) {
+        const oldestKey = idempotencyStore.keys().next().value;
+        idempotencyStore.delete(oldestKey);
+    }
+    idempotencyStore.set(key, { ...value, expiresAt: Date.now() + IDEMPOTENCY_TTL_MS });
 }
 
 // 4. Хелпери курсор-пагінації ("після елемента", як у лекції)
@@ -103,7 +122,7 @@ app.post('/orders', (req, res) => {
     const idempotencyKey = req.headers['idempotency-key'];
     const bodyFingerprint = fingerprint(req.body);
 
-    const existing = idempotencyStore.get(idempotencyKey);
+    const existing = getIdempotencyRecord(idempotencyKey);
     if (existing) {
         if (existing.fingerprint !== bodyFingerprint) {
             const err = new Error(
@@ -136,7 +155,7 @@ app.post('/orders', (req, res) => {
         status: 'new',
     };
     orders.push(order);
-    idempotencyStore.set(idempotencyKey, { fingerprint: bodyFingerprint, order });
+    setIdempotencyRecord(idempotencyKey, { fingerprint: bodyFingerprint, order });
 
     res.status(201).json(order);
 });
