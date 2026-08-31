@@ -1,99 +1,110 @@
-# Marketplace API — ДЗ №9 (ДЗ №1 курсового проєкту)
+# Marketplace API
 
-OpenAPI-контракт та мінімальний Express-сервер для курсового проєкту Node.js Pro.
-Каталог товарів (`/products`) та оформлення замовлень (`/orders`) з курсор-пагінацією,
-обов'язковим заголовком `Idempotency-Key` на створенні замовлення та помилками у
-форматі `application/problem+json` (RFC 9457).
+Навчальний курсовий проєкт: REST API для маркетплейсу (товари та замовлення) на NestJS.
 
 ## Обраний варіант
 
-**Варіант Б — runtime-валідація на кордоні.**
+API реалізує 2 ресурси та 5 операцій:
 
-Мінімальний сервер на Express (`app.js`), де `express-openapi-validator` валідує
-кожен запит і кожну відповідь проти `openapi/openapi.yaml` (`validateRequests: true`,
-`validateResponses: true`), а власний error-handler перекладає помилки валідатора у
-`problem+json`. Реалізовано всі 5 операцій зі спеки з in-memory даними (без БД).
+- `GET /products` — список товарів (курсорна пагінація)
+- `GET /products/{productId}` — товар за id
+- `GET /orders` — список замовлень (курсорна пагінація)
+- `GET /orders/{orderId}` — замовлення за id
+- `POST /orders` — створення замовлення, з підтримкою ідемпотентності через заголовок `Idempotency-Key`
 
-Додатково реалізована повна семантика `Idempotency-Key` (позначена в ДЗ як бонус,
-не обов'язковий для балів): повтор того самого ключа й тіла повертає той самий `201`
-із заголовком `Idempotency-Replay: true`; той самий ключ з іншим тілом — `422 problem+json`.
+Ідемпотентність: клієнт сам генерує унікальний `Idempotency-Key` для кожного нового замовлення. Якщо той самий ключ повторно приходить з тим самим тілом запиту — сервер повертає збережену раніше відповідь (з заголовком `Idempotency-Replay: true`), не створюючи нове замовлення. Якщо той самий ключ приходить з іншим тілом — повертається `422 Unprocessable Entity`.
+
+Усі помилки повертаються в єдиному форматі `application/problem+json` (RFC 9457): `type`, `title`, `status`, `detail`, `instance`.
+
+## Технології
+
+- NestJS (контролери, DTO з `class-validator`, `@nestjs/swagger` для контракту з коду)
+- PostgreSQL (через `pg.Pool`), Docker Compose
+- Zod — валідація змінних середовища з fail-fast стартом
 
 ## Встановлення
 
-```
 npm install
-```
+
+
+## Конфігурація
+
+Проєкт читає конфігурацію з `.env`-файлу в корені проєкту. Скопіюй шаблон і заповни своїми значеннями:
+
+cp .env.example .env
+
+
+| Змінна        | Обов'язкова | Опис                                              |
+|---------------|:-----------:|----------------------------------------------------|
+| `PORT`        | ні (`3000` за замовч.) | Порт HTTP-сервера                        |
+| `NODE_ENV`    | ні (`development` за замовч.) | `development` \| `test` \| `production` |
+| `DB_HOST`     | так         | Хост PostgreSQL                                    |
+| `DB_PORT`     | ні (`5432` за замовч.) | Порт PostgreSQL                          |
+| `DB_USER`     | так         | Користувач PostgreSQL                              |
+| `DB_PASSWORD` | так         | Пароль PostgreSQL                                  |
+| `DB_NAME`     | так         | Назва бази даних                                   |
+
+Конфігурація валідується Zod-схемою (`src/config/env.schema.ts`) одразу при старті застосунку. Якщо змінна відсутня або має неправильний тип — застосунок **не стартує** і одразу завершується з чіткою помилкою (fail-fast), замість того щоб впасти пізніше під час роботи.
+
+Перевірити конфігурацію без запуску всього застосунку:
+
+npm run check:env
+
+
+**Секрети:** `.env` ніколи не комітиться в git (див. `.gitignore`) і ніколи не потрапляє у Docker-образ (див. `.dockerignore`). У самому `Dockerfile`/`docker-compose.yml` немає жодного реального значення секрету — лише посилання на змінні середовища, які підставляються під час запуску контейнера, а не під час збірки образу.
 
 ## Запуск
 
-```
-npm start
-```
+Локально (без Docker), потрібен вже запущений Postgres:
 
-Сервер піднімається на `http://localhost:3000`.
+npm run start:nest:dev
 
-## Перевірка
+Разом із Postgres через Docker Compose:
 
-### Спека
+docker compose up -d
+npm run start:nest:dev
 
-```
-npx @redocly/cli lint openapi/openapi.yaml
-npx @redocly/cli bundle openapi/openapi.yaml -o spec.json
-node check-spec.js
-```
 
-Очікується: лінт — exit code 0 (warnings допустимі, errors — ні); `check-spec.js` —
-`операцій: 5 · ресурсів: 2`, `Idempotency-Key: required = true`, опис ≥ 40 символів.
+Після старту:
+- API: `http://localhost:3000`
+- Swagger-документація (згенерована з коду через `@nestjs/swagger`): `http://localhost:3000/docs`
+- Перевірка стану застосунку та підключення до БД: `http://localhost:3000/health`
 
-Кількість згадувань у спеці:
+## Ротація пароля БД без рестарту
 
-```
-grep -c 'Idempotency-Key' openapi/openapi.yaml
-grep -c 'next_cursor' openapi/openapi.yaml
-grep -c 'application/problem+json' openapi/openapi.yaml
-```
+`pg.Pool` у застосунку налаштований так, що пароль передається не рядком, а функцією (`src/database/database.module.ts`), яка викликається наново під час кожного нового підключення до Postgres. Це дозволяє змінити пароль "на льоту", без перезапуску Node-процесу.
 
-(на Windows PowerShell без grep — еквівалент:
-`(Select-String -Path openapi/openapi.yaml -Pattern 'Idempotency-Key').Count` і так само
-для інших двох патернів)
+Скрипт `rotate.ps1` (PowerShell, для Windows) / `rotate.sh` (bash) виконує повний цикл ротації:
+1. Генерує новий випадковий пароль.
+2. Застосовує його в Postgres (`ALTER ROLE`).
+3. Повідомляє застосунок через внутрішній ендпоінт `POST /internal/rotate-db-password`.
+4. Розриває старі з'єднання (`pg_terminate_backend`), щоб застосунок одразу перепідключився з новим паролем.
 
-### Сервер (після `npm start`, у іншому терміналі)
+Запуск (Windows):
 
-Тестові тіла запитів лежать у файлах `valid-order.json`, `empty-items.json`,
-`other-order.json` у корені репозиторію.
+.\rotate.ps1
 
-```
-curl -i -X POST http://localhost:3000/orders -H "Content-Type: application/json" -d @valid-order.json
-```
-→ `400`, `Content-Type: application/problem+json` (немає Idempotency-Key)
 
-```
-curl -i -X POST http://localhost:3000/orders -H "Content-Type: application/json" -H "Idempotency-Key: test-key-1" -d @empty-items.json
-```
-→ `400`, `application/problem+json` (`items` порожній)
+**Важливо:** ендпоінт `/internal/rotate-db-password` у цьому навчальному проєкті навмисно залишений без авторизації для простоти демонстрації механізму. У реальному продакшн-проєкті такий ендпоінт обов'язково має бути захищений (окрема мережа, токен адміністратора тощо) або взагалі відсутній — ротацію мав би ініціювати довірений секрет-менеджер (Vault, AWS Secrets Manager, Infisical), а не публічний HTTP-виклик.
 
-```
-curl -i -X POST http://localhost:3000/orders -H "Content-Type: application/json" -H "Idempotency-Key: test-key-2" -d @valid-order.json
-```
-→ `201`, створено замовлення
+## Docker
 
-Повторіть останню команду ще раз з тим самим ключем — отримаєте `201` +
-`Idempotency-Replay: true` і той самий `id` замовлення. З ключем `test-key-2`, але
-тілом з `other-order.json` — отримаєте `422 problem+json`.
+Збірка production-образу застосунку (multi-stage build — фінальний образ не містить dev-залежностей і TypeScript-джерел):
 
-Курсор-пагінація каталогу:
+docker build -t marketplace-api .
 
-```
-curl -i "http://localhost:3000/products?limit=2"
-curl -i "http://localhost:3000/products?limit=2&cursor=<next_cursor з попередньої відповіді>"
-```
 
 ## Структура
 
-| Файл / тека | Призначення |
-|---|---|
-| `openapi/openapi.yaml` | контракт: 2 ресурси (products, orders), 5 операцій, cursor-пагінація, Idempotency-Key, problem+json |
-| `app.js` | Express-сервер з express-openapi-validator, in-memory дані, error-handler, логіка Idempotency-Key |
-| `check-spec.js` | програмна перевірка обсягу спеки |
-| `spec.json` | зібрана (bundled) спека — результат `redocly bundle` |
-| `valid-order.json`, `empty-items.json`, `other-order.json` | тестові тіла запитів для ручної перевірки |
+| Шлях                          | Призначення                                      |
+|-------------------------------|---------------------------------------------------|
+| `src/products/`                | Модуль товарів (контролер, сервіс, DTO)          |
+| `src/orders/`                  | Модуль замовлень (контролер, сервіс, DTO)        |
+| `src/common/`                  | Пагінація, exception filter, interceptor         |
+| `src/config/`                  | Zod-схема середовища та fail-fast валідація      |
+| `src/database/`                | `pg.Pool`, сховище пароля для ротації            |
+| `src/health/`                  | Ендпоінт `/health`                               |
+| `src/admin/`                   | Внутрішній ендпоінт ротації пароля               |
+| `docker-compose.yml`           | PostgreSQL для локальної розробки                |
+| `Dockerfile`                   | Production-образ застосунку (multi-stage)        |
+| `rotate.ps1` / `rotate.sh`     | Скрипт ротації пароля БД без рестарту             |
