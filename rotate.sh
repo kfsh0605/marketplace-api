@@ -12,7 +12,8 @@ docker compose exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" \
   -c "ALTER ROLE $DB_USER WITH PASSWORD '$NEW_PASSWORD';"
 
 echo "Оновлюю файл секрету..."
-echo -n "$NEW_PASSWORD" > secrets/db_password
+echo -n "$NEW_PASSWORD" > secrets/db_password.tmp
+mv secrets/db_password.tmp secrets/db_password
 
 echo "Розриваю старі з'єднання..."
 docker compose exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" \

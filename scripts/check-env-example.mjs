@@ -1,8 +1,7 @@
 import { readFileSync } from 'node:fs';
+import { envSchema } from '../src/config/env.schema.ts';
 
-// Список змінних, які має містити .env.example.
-// Синхронізований вручну зі src/config/env.schema.ts.
-const REQUIRED_KEYS = ['PORT', 'NODE_ENV', 'DB_HOST', 'DB_PORT', 'DB_USER', 'DB_NAME'];
+const REQUIRED_KEYS = Object.keys(envSchema.shape);
 
 const content = readFileSync('.env.example', 'utf8');
 
