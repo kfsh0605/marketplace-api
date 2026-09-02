@@ -1,99 +1,126 @@
-# Marketplace API — ДЗ №9 (ДЗ №1 курсового проєкту)
+# Marketplace API
 
-OpenAPI-контракт та мінімальний Express-сервер для курсового проєкту Node.js Pro.
-Каталог товарів (`/products`) та оформлення замовлень (`/orders`) з курсор-пагінацією,
-обов'язковим заголовком `Idempotency-Key` на створенні замовлення та помилками у
-форматі `application/problem+json` (RFC 9457).
+Навчальний курсовий проєкт: REST API для маркетплейсу (товари та замовлення) на NestJS.
 
 ## Обраний варіант
 
-**Варіант Б — runtime-валідація на кордоні.**
+API реалізує 2 ресурси та 5 операцій:
 
-Мінімальний сервер на Express (`app.js`), де `express-openapi-validator` валідує
-кожен запит і кожну відповідь проти `openapi/openapi.yaml` (`validateRequests: true`,
-`validateResponses: true`), а власний error-handler перекладає помилки валідатора у
-`problem+json`. Реалізовано всі 5 операцій зі спеки з in-memory даними (без БД).
+- `GET /products` — список товарів (курсорна пагінація)
+- `GET /products/{productId}` — товар за id
+- `GET /orders` — список замовлень (курсорна пагінація)
+- `GET /orders/{orderId}` — замовлення за id
+- `POST /orders` — створення замовлення, з підтримкою ідемпотентності через заголовок `Idempotency-Key`
 
-Додатково реалізована повна семантика `Idempotency-Key` (позначена в ДЗ як бонус,
-не обов'язковий для балів): повтор того самого ключа й тіла повертає той самий `201`
-із заголовком `Idempotency-Replay: true`; той самий ключ з іншим тілом — `422 problem+json`.
+Ідемпотентність: клієнт сам генерує унікальний `Idempotency-Key` для кожного нового замовлення. Якщо той самий ключ повторно приходить з тим самим тілом запиту — сервер повертає збережену раніше відповідь (з заголовком `Idempotency-Replay: true`), не створюючи нове замовлення. Якщо той самий ключ приходить з іншим тілом — повертається `422 Unprocessable Entity`.
+
+Усі помилки повертаються в єдиному форматі `application/problem+json` (RFC 9457): `type`, `title`, `status`, `detail`, `instance`.
+
+## Технології
+
+- NestJS (контролери, DTO з `class-validator`, `@nestjs/swagger` для контракту з коду)
+- PostgreSQL (через `pg.Pool`), Docker Compose
+- Zod — валідація змінних середовища з fail-fast стартом
 
 ## Встановлення
 
-```
 npm install
-```
+
+
+## Конфігурація
+
+Проєкт читає конфігурацію з двох джерел: `.env`-файл (звичайні налаштування) та `secrets/db_password` (пароль БД — окремо, файлом, а не змінною середовища).
+
+1. Скопіюй шаблон змінних середовища і заповни своїми значеннями:
+   cp .env.example .env
+2. Створи файл-секрет з паролем PostgreSQL:
+   mkdir secrets
+   echo dev_password_change_me > secrets/db_password
+
+| Змінна        | Обов'язкова | Опис                                              |
+|---------------|:-----------:|----------------------------------------------------|
+| `PORT`        | ні (`3000` за замовч.) | Порт HTTP-сервера                        |
+| `NODE_ENV`    | ні (`development` за замовч.) | `development` \| `test` \| `production` |
+| `DB_HOST`     | так         | Хост PostgreSQL                                    |
+| `DB_PORT`     | ні (`5432` за замовч.) | Порт PostgreSQL                          |
+| `DB_USER`     | так         | Користувач PostgreSQL                              |
+| `DB_NAME`     | так         | Назва бази даних                                   |
+
+Пароль PostgreSQL **не** є змінною середовища — він читається застосунком з файлу `secrets/db_password` (`src/database/database.module.ts`), причому файл перечитується заново при кожному новому підключенні до БД. Це і дозволяє міняти пароль без рестарту застосунку (див. розділ "Ротація" нижче).
+
+Конфігурація зі схеми (`src/config/env.schema.ts`, Zod) валідується одразу при старті застосунку через `ConfigModule.forRoot({ validate })`. Якщо обов'язкова змінна відсутня або має неправильний тип — застосунок **не стартує** і одразу завершується з ненульовим кодом виходу та переліком усіх помилок одразу (fail-fast), замість того щоб впасти пізніше під час роботи.
+
+Перевірити, що `.env.example` не розійшовся зі схемою (без запуску застосунку):
+
+npm run check:env
+
+
+**Секрети:** `.env` і `secrets/db_password` ніколи не комітяться в git (див. `.gitignore`) і ніколи не потрапляють у Docker-образ (див. `.dockerignore`) — у самому образі є лише `.env.example` як довідковий шаблон. У `Dockerfile`/`docker-compose.yml` немає жодного реального значення секрету: Postgres теж отримує пароль через файл (`POSTGRES_PASSWORD_FILE`, той самий `secrets/db_password`), а не через змінну середовища.
 
 ## Запуск
 
-```
-npm start
-```
+Разова збірка та запуск (використовується і в Docker, і як `npm run start` — процес завершується з ненульовим кодом при помилці конфігурації, тому годиться і для CI-перевірок):
 
-Сервер піднімається на `http://localhost:3000`.
+npm run build
+npm run start
 
-## Перевірка
+Розробка з автоперезапуском при зміні файлів:
 
-### Спека
+npm run start:dev
 
-```
-npx @redocly/cli lint openapi/openapi.yaml
-npx @redocly/cli bundle openapi/openapi.yaml -o spec.json
-node check-spec.js
-```
+Разом із Postgres через Docker Compose:
 
-Очікується: лінт — exit code 0 (warnings допустимі, errors — ні); `check-spec.js` —
-`операцій: 5 · ресурсів: 2`, `Idempotency-Key: required = true`, опис ≥ 40 символів.
+docker compose up -d
+npm run start:dev
 
-Кількість згадувань у спеці:
 
-```
-grep -c 'Idempotency-Key' openapi/openapi.yaml
-grep -c 'next_cursor' openapi/openapi.yaml
-grep -c 'application/problem+json' openapi/openapi.yaml
-```
+Після старту:
+- API: `http://localhost:3000`
+- Swagger-документація (згенерована з коду через `@nestjs/swagger`): `http://localhost:3000/docs`
+- Перевірка стану застосунку, підключення до БД та uptime процесу: `http://localhost:3000/health`
 
-(на Windows PowerShell без grep — еквівалент:
-`(Select-String -Path openapi/openapi.yaml -Pattern 'Idempotency-Key').Count` і так само
-для інших двох патернів)
+## Ротація пароля БД без рестарту
 
-### Сервер (після `npm start`, у іншому терміналі)
+`pg.Pool` у застосунку налаштований так, що пароль передається не рядком, а функцією (`src/database/database.module.ts`), яка при кожному новому підключенні до Postgres заново читає файл `secrets/db_password` з диска. Ніякого кешування паролю в пам'яті немає — тому змінити пароль можна "на льоту", без перезапуску Node-процесу.
 
-Тестові тіла запитів лежать у файлах `valid-order.json`, `empty-items.json`,
-`other-order.json` у корені репозиторію.
+Скрипт `rotate.sh` виконує повний цикл ротації в правильному порядку:
+1. Генерує новий випадковий пароль.
+2. Застосовує його в Postgres (`ALTER ROLE ... WITH PASSWORD ...`).
+3. **Тільки після цього** перезаписує файл `secrets/db_password` (порядок важливий: якщо зробити навпаки, виникне вікно, коли файл уже з новим паролем, а Postgres ще очікує старий).
+4. Розриває всі активні з'єднання від імені застосунку (`pg_terminate_backend`), щоб `pg.Pool` одразу переоткрив з'єднання вже з новим паролем.
 
-```
-curl -i -X POST http://localhost:3000/orders -H "Content-Type: application/json" -d @valid-order.json
-```
-→ `400`, `Content-Type: application/problem+json` (немає Idempotency-Key)
+Запуск:
 
-```
-curl -i -X POST http://localhost:3000/orders -H "Content-Type: application/json" -H "Idempotency-Key: test-key-1" -d @empty-items.json
-```
-→ `400`, `application/problem+json` (`items` порожній)
+bash rotate.sh
 
-```
-curl -i -X POST http://localhost:3000/orders -H "Content-Type: application/json" -H "Idempotency-Key: test-key-2" -d @valid-order.json
-```
-→ `201`, створено замовлення
+(на Windows — через Git Bash, який встановлюється разом із Git for Windows)
 
-Повторіть останню команду ще раз з тим самим ключем — отримаєте `201` +
-`Idempotency-Replay: true` і той самий `id` замовлення. З ключем `test-key-2`, але
-тілом з `other-order.json` — отримаєте `422 problem+json`.
+Перевірити, що ротація пройшла без рестарту, можна порівнявши `uptime` в `/health` до і після:
 
-Курсор-пагінація каталогу:
+curl http://localhost:3000/health # запам'ятай uptime
+bash rotate.sh
+curl http://localhost:3000/health # uptime має бути більшим, а не скинутим до нуля
 
-```
-curl -i "http://localhost:3000/products?limit=2"
-curl -i "http://localhost:3000/products?limit=2&cursor=<next_cursor з попередньої відповіді>"
-```
+
+## Docker
+
+Збірка production-образу застосунку (multi-stage build — фінальний образ не містить dev-залежностей, TypeScript-джерел, `.env` і `secrets/`):
+
+docker build -t marketplace-api .
+
 
 ## Структура
 
-| Файл / тека | Призначення |
-|---|---|
-| `openapi/openapi.yaml` | контракт: 2 ресурси (products, orders), 5 операцій, cursor-пагінація, Idempotency-Key, problem+json |
-| `app.js` | Express-сервер з express-openapi-validator, in-memory дані, error-handler, логіка Idempotency-Key |
-| `check-spec.js` | програмна перевірка обсягу спеки |
-| `spec.json` | зібрана (bundled) спека — результат `redocly bundle` |
-| `valid-order.json`, `empty-items.json`, `other-order.json` | тестові тіла запитів для ручної перевірки |
+| Шлях                          | Призначення                                      |
+|-------------------------------|---------------------------------------------------|
+| `src/products/`                | Модуль товарів (контролер, сервіс, DTO)          |
+| `src/orders/`                  | Модуль замовлень (контролер, сервіс, DTO)        |
+| `src/common/`                  | Пагінація, exception filter, interceptor         |
+| `src/config/`                  | Zod-схема середовища та fail-fast валідація      |
+| `src/database/`                | `pg.Pool` з паролем-функцією, що читає файл-секрет |
+| `src/health/`                  | Ендпоінт `/health` (стан БД + uptime)            |
+| `secrets/db_password`          | Файл-секрет з паролем PostgreSQL (у `.gitignore`)|
+| `scripts/check-env-example.mjs`| Звірка `.env.example` зі схемою (`npm run check:env`) |
+| `docker-compose.yml`           | PostgreSQL для локальної розробки                |
+| `Dockerfile` + `.dockerignore` | Production-образ застосунку (multi-stage), без секретів у шарах |
+| `rotate.sh`                    | Ротація пароля БД без рестарту                   |
