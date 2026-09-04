@@ -115,9 +115,14 @@ docker build -t marketplace-api .
 
 Підняти Postgres з нуля (файл-секрет береться з шаблону, якщо реального ще нема):
 
-docker compose down -v
-cp secrets/db_password.example secrets/db_password
-docker compose up -d --wait
+Підняти Postgres з нуля (потрібні `.env` і файл-секрет — беремо з шаблонів, якщо реальних ще нема):
+
+    docker compose down -v
+    cp .env.example .env
+    cp secrets/db_password.example secrets/db_password
+    docker compose up -d --wait
+
+(PowerShell: замість `cp` — `Copy-Item .env.example .env` і `Copy-Item secrets/db_password.example secrets/db_password`)
 
 (PowerShell: замість `cp` — `Copy-Item secrets/db_password.example secrets/db_password -ErrorAction SilentlyContinue`)
 
