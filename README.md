@@ -33,18 +33,18 @@ npm install
 
 1. Скопіюй шаблон змінних середовища і заповни своїми значеннями:
    cp .env.example .env
-2. Створи файл-секрет з паролем PostgreSQL:
-   mkdir secrets
-   echo dev_password_change_me > secrets/db_password
+2. Створи файл-секрет з паролем PostgreSQL (для локальної розробки підійде шаблон):
+   cp secrets/db_password.example secrets/db_password
 
-| Змінна        | Обов'язкова | Опис                                              |
-|---------------|:-----------:|----------------------------------------------------|
-| `PORT`        | ні (`3000` за замовч.) | Порт HTTP-сервера                        |
-| `NODE_ENV`    | ні (`development` за замовч.) | `development` \| `test` \| `production` |
-| `DB_HOST`     | так         | Хост PostgreSQL                                    |
-| `DB_PORT`     | ні (`5432` за замовч.) | Порт PostgreSQL                          |
-| `DB_USER`     | так         | Користувач PostgreSQL                              |
-| `DB_NAME`     | так         | Назва бази даних                                   |
+| Змінна          | Обов'язкова | Опис                                              |
+|-----------------|:-----------:|----------------------------------------------------|
+| `PORT`          | ні (`3000` за замовч.) | Порт HTTP-сервера                        |
+| `NODE_ENV`      | ні (`development` за замовч.) | `development` \| `test` \| `production` |
+| `DB_HOST`       | так         | Хост PostgreSQL                                    |
+| `DB_PORT`       | ні (`5432` за замовч.) | Порт PostgreSQL                          |
+| `DB_USER`       | так         | Користувач PostgreSQL                              |
+| `DB_NAME`       | так         | Назва бази даних                                   |
+| `DATABASE_URL`  | ні          | Рядок підключення до БД одним рядком (контракт для сумісності з ДЗ #13 та інструментами на кшталт грейдера). **Джерело — сховище**: в реальному оточенні значення приходить із секрет-менеджера/змінних середовища платформи, а не з файлу в git. Сам застосунок (`src/database/database.module.ts`) продовжує підключатись через `DB_HOST`/`DB_PORT`/`DB_USER`/`DB_NAME` + файл-пароль нижче — `DATABASE_URL` цю логіку не замінює. |
 
 Пароль PostgreSQL **не** є змінною середовища — він читається застосунком з файлу `secrets/db_password` (`src/database/database.module.ts`), причому файл перечитується заново при кожному новому підключенні до БД. Це і дозволяє міняти пароль без рестарту застосунку (див. розділ "Ротація" нижче).
 
@@ -55,7 +55,7 @@ npm install
 npm run check:env
 
 
-**Секрети:** `.env` і `secrets/db_password` ніколи не комітяться в git (див. `.gitignore`) і ніколи не потрапляють у Docker-образ (див. `.dockerignore`) — у самому образі є лише `.env.example` як довідковий шаблон. У `Dockerfile`/`docker-compose.yml` немає жодного реального значення секрету: Postgres теж отримує пароль через файл (`POSTGRES_PASSWORD_FILE`, той самий `secrets/db_password`), а не через змінну середовища.
+**Секрети:** `.env` і `secrets/db_password` ніколи не комітяться в git (див. `.gitignore`) і ніколи не потрапляють у Docker-образ (див. `.dockerignore`) — у самому образі є лише `.env.example` як довідковий шаблон. У `Dockerfile`/`docker-compose.yml` немає жодного реального значення секрету: Postgres теж отримує пароль через файл (`POSTGRES_PASSWORD_FILE`, той самий `secrets/db_password`), а не через змінну середовища. У git натомість лежить `secrets/db_password.example` — шаблон із заглушкою, з якого й копіюється реальний файл.
 
 ## Запуск
 
@@ -109,6 +109,36 @@ curl http://localhost:3000/health # uptime має бути більшим, а н
 docker build -t marketplace-api .
 
 
+## База даних (ДЗ №12)
+
+Головна таблиця — **`orders`** (мінімум 100 000 рядків після `db/seed.sql`, фактично 120 000).
+
+Підняти Postgres з нуля (файл-секрет береться з шаблону, якщо реального ще нема):
+
+Підняти Postgres з нуля (потрібні `.env` і файл-секрет — беремо з шаблонів, якщо реальних ще нема):
+
+    docker compose down -v
+    cp .env.example .env
+    cp secrets/db_password.example secrets/db_password
+    docker compose up -d --wait
+
+(PowerShell: замість `cp` — `Copy-Item .env.example .env` і `Copy-Item secrets/db_password.example secrets/db_password`)
+
+(PowerShell: замість `cp` — `Copy-Item secrets/db_password.example secrets/db_password -ErrorAction SilentlyContinue`)
+
+Прогнати всі кроки по порядку (папка `db/` змонтована всередину контейнера Postgres як `/db`, тому команди однакові в будь-якій оболонці):
+
+docker compose exec -T postgres psql -U marketplace -d marketplace -v ON_ERROR_STOP=1 -f /db/schema.sql
+docker compose exec -T postgres psql -U marketplace -d marketplace -v ON_ERROR_STOP=1 -f /db/seed.sql
+docker compose exec -T postgres psql -U marketplace -d marketplace -v ON_ERROR_STOP=1 -f /db/indexes.sql
+docker compose exec -T postgres psql -U marketplace -d marketplace -c "ANALYZE;"
+
+Перевірити, що база піднялась і готова приймати запити:
+
+docker compose exec -T postgres psql -U marketplace -d marketplace -Atc "SELECT 1"
+
+Порівняння `EXPLAIN (ANALYZE, BUFFERS)` до і після застосування індексів — `db/OPTIMIZATIONS.md`.
+
 ## Структура
 
 | Шлях                          | Призначення                                      |
@@ -119,8 +149,14 @@ docker build -t marketplace-api .
 | `src/config/`                  | Zod-схема середовища та fail-fast валідація      |
 | `src/database/`                | `pg.Pool` з паролем-функцією, що читає файл-секрет |
 | `src/health/`                  | Ендпоінт `/health` (стан БД + uptime)            |
+| `db/schema.sql`                | Таблиці курсового домену (`users`, `products`, `orders`, `order_items`) + constraints |
+| `db/seed.sql`                  | Генерація ~120 000 замовлень і пов'язаних даних, `VACUUM (ANALYZE)` наприкінці |
+| `db/queries/q1.sql, q2.sql, q3.sql` | Три "важкі" запити (власник+період, статус, регістронезалежний пошук) |
+| `db/indexes.sql`               | Індекси-ліки для цих трьох запитів (composite, partial, expression) |
+| `db/OPTIMIZATIONS.md`          | `EXPLAIN (ANALYZE, BUFFERS)` до/після по кожному запиту |
 | `secrets/db_password`          | Файл-секрет з паролем PostgreSQL (у `.gitignore`)|
+| `secrets/db_password.example`  | Шаблон секрету для свіжого клону/грейдера        |
 | `scripts/check-env-example.mjs`| Звірка `.env.example` зі схемою (`npm run check:env`) |
-| `docker-compose.yml`           | PostgreSQL для локальної розробки                |
+| `docker-compose.yml`           | PostgreSQL для локальної розробки, `db/` змонтована в контейнер як `/db` |
 | `Dockerfile` + `.dockerignore` | Production-образ застосунку (multi-stage), без секретів у шарах |
 | `rotate.sh`                    | Ротація пароля БД без рестарту                   |
