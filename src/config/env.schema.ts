@@ -7,8 +7,8 @@ export const envSchema = z.object({
     DB_PORT: z.coerce.number().int().positive().default(5432),
     DB_USER: z.string().min(1),
     DB_NAME: z.string().min(1),
+    DATABASE_URL: z.string().min(1).optional(),
 });
-
 export type Env = z.infer<typeof envSchema>;
 
 export function validateEnv(config: Record<string, unknown>): Env {
