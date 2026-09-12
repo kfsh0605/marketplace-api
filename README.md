@@ -182,6 +182,7 @@ docker compose exec -T postgres psql -U marketplace -d marketplace -Atc "SELECT 
 
 Грейдер (і будь-хто на свіжому клоні без доступу до сховища секретів) виконує рівно ці команди з кореня репозиторію:
 
+    cp secrets/db_password.example secrets/db_password
     docker compose up -d --wait
     export DB_HOST=127.0.0.1
     export DB_PORT=5432
@@ -206,7 +207,7 @@ docker compose exec -T postgres psql -U marketplace -d marketplace -Atc "SELECT 
     npm run demo:nplus1
     npm run report
 
-`DB_PASSWORD=dev_password_change_me` — те саме dev-значення, що лежить у `secrets/db_password.example` і завжди використовується для локальної розробки; воно навмисно не є секретом (домовленість з ДЗ №11).
+`DB_PASSWORD=dev_password_change_me` — те саме dev-значення, що лежить у `secrets/db_password.example` і завжди використовується для локальної розробки; воно навмисно не є секретом (домовленість з ДЗ №11). Крок `cp secrets/db_password.example secrets/db_password` обов'язковий: без нього Docker при спробі змонтувати неіснуючий секрет-файл створить на його місці порожню директорію замість файлу, і Postgres впаде з помилкою "superuser password is not specified" (перевірено на реальному чистому клоні).
 
 Перевірка ідемпотентності сіда (кількість рядків не змінюється після повторного запуску):
 
