@@ -145,3 +145,5 @@ vite.config.ts.timestamp-*
 .idea/
 spec.json
 secrets/db_password
+
+.npmrc
