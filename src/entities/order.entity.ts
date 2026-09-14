@@ -2,6 +2,8 @@ import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, OneToMany, JoinColum
 import { User } from './user.entity';
 import { OrderItem } from './order-item.entity';
 
+@Index(['user', 'createdAt'])
+@Index('IDX_orders_pending_created', ['createdAt'], { where: "status = 'pending'" })
 @Entity('orders')
 export class Order {
     @PrimaryGeneratedColumn()
@@ -14,7 +16,6 @@ export class Order {
     @Column()
     customerEmail: string;
 
-    @Index()
     @Column()
     status: string;
 

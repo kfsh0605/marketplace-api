@@ -183,13 +183,13 @@ docker compose exec -T postgres psql -U marketplace -d marketplace -Atc "SELECT 
 Грейдер (і будь-хто на свіжому клоні без доступу до сховища секретів) виконує рівно ці команди з кореня репозиторію:
 
     cp secrets/db_password.example secrets/db_password
-    docker compose up -d --wait
     export DB_HOST=127.0.0.1
     export DB_PORT=5432
     export DB_USER=marketplace
     export DB_PASSWORD=dev_password_change_me
     export DB_NAME=marketplace
     export SKIP_VAULT=1    # у грейдера немає доступу до сховища
+    docker compose up -d --wait
 
     npm ci
     npx tsc --noEmit
