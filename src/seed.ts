@@ -15,26 +15,26 @@ async function seed() {
 
     console.log('Seeding users...');
     const usersData = [
-        { email: 'olena.kravchenko@example.com', name: 'Олена Кравченко' },
-        { email: 'ivan.petrenko@example.com', name: 'Іван Петренко' },
-        { email: 'maria.bondar@example.com', name: 'Марія Бондар' },
-        { email: 'andriy.tkachenko@example.com', name: 'Андрій Ткаченко' },
-        { email: 'natalia.moroz@example.com', name: 'Наталія Мороз' },
-        { email: 'dmytro.shevchenko@example.com', name: 'Дмитро Шевченко' },
+        { email: 'olena.kravchenko@example.com', name: 'Олена Кравченко', balanceCents: 500_000 },
+        { email: 'ivan.petrenko@example.com', name: 'Іван Петренко', balanceCents: 500_000 },
+        { email: 'maria.bondar@example.com', name: 'Марія Бондар', balanceCents: 500_000 },
+        { email: 'andriy.tkachenko@example.com', name: 'Андрій Ткаченко', balanceCents: 500_000 },
+        { email: 'natalia.moroz@example.com', name: 'Наталія Мороз', balanceCents: 500_000 },
+        { email: 'dmytro.shevchenko@example.com', name: 'Дмитро Шевченко', balanceCents: 500_000 },
     ];
     await userRepo.upsert(usersData, ['email']);
     const users = await userRepo.find({ order: { id: 'ASC' } });
 
     console.log('Seeding products...');
     const productsData = [
-        { name: 'Механічна клавіатура', priceCents: 249900, currency: 'UAH' },
-        { name: 'Бездротова миша', priceCents: 89900, currency: 'UAH' },
-        { name: 'Монітор 27"', priceCents: 899900, currency: 'UAH' },
-        { name: 'USB-C хаб', priceCents: 64900, currency: 'UAH' },
-        { name: 'Веб-камера Full HD', priceCents: 129900, currency: 'UAH' },
-        { name: 'Навушники з мікрофоном', priceCents: 159900, currency: 'UAH' },
-        { name: 'Зовнішній SSD 1TB', priceCents: 249900, currency: 'UAH' },
-        { name: 'Портативна колонка', priceCents: 99900, currency: 'UAH' },
+        { name: 'Механічна клавіатура', priceCents: 249900, currency: 'UAH', stock: 50 },
+        { name: 'Бездротова миша', priceCents: 89900, currency: 'UAH', stock: 50 },
+        { name: 'Монітор 27"', priceCents: 899900, currency: 'UAH', stock: 50 },
+        { name: 'USB-C хаб', priceCents: 64900, currency: 'UAH', stock: 50 },
+        { name: 'Веб-камера Full HD', priceCents: 129900, currency: 'UAH', stock: 50 },
+        { name: 'Навушники з мікрофоном', priceCents: 159900, currency: 'UAH', stock: 50 },
+        { name: 'Зовнішній SSD 1TB', priceCents: 249900, currency: 'UAH', stock: 50 },
+        { name: 'Портативна колонка', priceCents: 99900, currency: 'UAH', stock: 50 },
     ];
     await productRepo.upsert(productsData, ['name']);
     const products = await productRepo.find({ order: { id: 'ASC' } });

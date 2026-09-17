@@ -178,6 +178,52 @@ docker compose exec -T postgres psql -U marketplace -d marketplace -Atc "SELECT 
 
 `Repository` (`find`, `findOne`, `save`, `upsert`) використовується всюди, де потрібні самі сутності схеми — читання, запис, підвантаження зв'язків. `QueryBuilder` (`createQueryBuilder().getRawMany()`) — лише там, де результат у принципі не є сутністю: агрегати (`SUM`, `GROUP BY`), як у `report.ts`. Межа проста: якщо результат запиту можна змалювати як список об'єктів `Order`/`Product`/... — це `Repository`; якщо результат — обчислене значення (сума, кількість, групування) — це `QueryBuilder` з `getRawMany()`.
 
+## Конкурентність: транзакційний checkout, черга задач і retry (ДЗ №14)
+
+Бізнес-операція "оформити замовлення" (`src/checkout.ts`) виконується в одній транзакції на одному клієнті пула (`AppDataSource.transaction(...)`): атомарно зменшує `stock` товару, атомарно списує `balanceCents` покупця, записує `Order` + `OrderItem`, і кладе задачу на постобробку (лист/чек) у чергу `post_processing_jobs`. Якщо товару чи грошей не вистачає — транзакція відкочується цілком, замовлень-"сиріт" не виникає.
+
+### Чому атомарний `UPDATE ... RETURNING`, а не `SELECT ... FOR UPDATE`
+
+Обидва зменшення (stock і balance) реалізовані як `UPDATE ... SET x = x - $n WHERE ... AND x >= $n RETURNING ...`, а не як явний лок рядка. Перевірка достатності та сама зміна відбуваються одним неподільним оператором — між ними немає вікна, в яке могла б втрутитися інша транзакція, тому навіть дефолтний `READ COMMITTED` тут повністю захищає від lost update: Postgres сам чекає конкурентний `UPDATE`, що вже торкнувся цього рядка, і перевіряє `WHERE`-умову заново проти вже оновлених даних. `FOR UPDATE` був би виправданий, якби між читанням і записом потрібно було виконати щось зовнішнє (наприклад, звернутись до платіжного шлюзу) — тоді лок довелося б тримати відкритим на час цього звернення. У checkout такої паузи немає, тому атомарний `UPDATE` простіший і не змушує конкурентних покупців чекати один одного в черзі на рівні застосунку.
+
+### Черга задач і SKIP LOCKED
+
+Кожне успішне замовлення кладе рядок у `post_processing_jobs` (`status = 'new'`). Воркери (`src/demo-workers.ts`) розбирають чергу запитом `SELECT ... WHERE status = 'new' ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED`, тримаючи транзакцію відкритою на весь час "обробки" задачі, і лише в кінці одним пакетом виставляють `status = 'done'` і інкрементують лічильник `processed`. Порожній результат `SKIP LOCKED` не означає "черга порожня" (можливо, останні задачі саме зараз тримають інші воркери) — тому воркер перед завершенням додатково перевіряє реальну кількість задач зі `status = 'new'`.
+
+### Retry і чому лише 40001/40P01
+
+`demo:retry` навмисно відтворює read-modify-write під `REPEATABLE READ` (два конкурентні читання балансу з подальшим записом обчисленого в JS значення) — це той самий "поганий" патерн, що й lost update, але під ізоляцією, яка не дає його зробити тихо: другій транзакції, що намагається записати вже змінений конкурентом рядок, Postgres повертає `40001 (serialization_failure)`. Обгортка `withRetry` (`src/demo-retry.ts`) ловить **лише** `40001` і `40P01` (deadlock, `deadlock_detected`) — це єдині два коди, якими база сама каже "нічого не зламано, просто невдалий збіг у часі, повтори транзакцію цілком з початку". Будь-який інший код (наприклад, `23514` — порушення `CHECK`) означає реальну помилку в даних чи логіці: повторювати таку операцію безглуздо, вона провалиться так само і вдесяте. Повтор виконується **цілком**, включно з початковим читанням, а не лише останнім записом — інакше повтор просто відтворив би той самий lost update кроком пізніше, вже з застарілим значенням, зчитаним на першій спробі.
+
+### Команди
+
+    npm run demo:race       # 50 паралельних checkout() на товар зі stock=10
+    npm run demo:workers    # ≥2 воркери розбирають чергу задач через SKIP LOCKED
+    npm run demo:retry      # read-modify-write під REPEATABLE READ + retry на 40001
+
+Усі три, як і решта команд до бази, загорнуті у `scripts/with-secrets.sh dev ...`.
+
+### Цифри з реального запуску
+
+**`demo:race`** — 50 паралельних викликів `checkout()` на товар зі стартовим stock=10 (окремий, ізольований від каталогу товар `DEMO_RACE_PRODUCT`, ресетиться самим скриптом при кожному запуску):
+
+    Спроб: 50
+    Успішних: 10
+    Фінальний stock: 0
+    Рядків із від'ємним stock: 0
+
+**`demo:workers`** — 12 задач, 4 воркери, імітація роботи 100 мс на задачу:
+
+    Розподіл задач по воркерах: { worker-1: 3, worker-2: 3, worker-3: 3, worker-4: 3 }
+    Оброблено двічі: 0
+    Необроблено: 0
+    Час (паралельно): 359 мс
+    Час (послідовно, теоретично): 1200 мс
+
+**`demo:retry`** — конкурентний read-modify-write балансу під `REPEATABLE READ` (A: +5000, B: −3000, старт 100000):
+
+    [A] спроба 1 впала з 40001 (serialization failure), повтор через 69 мс
+    Фінальний баланс: 102000 (очікували 102000)
+
 ## Grading
 
 Грейдер (і будь-хто на свіжому клоні без доступу до сховища секретів) виконує рівно ці команди з кореня репозиторію:
@@ -207,6 +253,10 @@ docker compose exec -T postgres psql -U marketplace -d marketplace -Atc "SELECT 
     npm run demo:nplus1
     npm run report
 
+    npm run demo:race
+    npm run demo:workers
+    npm run demo:retry
+
 `DB_PASSWORD=dev_password_change_me` — те саме dev-значення, що лежить у `secrets/db_password.example` і завжди використовується для локальної розробки; воно навмисно не є секретом (домовленість з ДЗ №11). Крок `cp secrets/db_password.example secrets/db_password` обов'язковий: без нього Docker при спробі змонтувати неіснуючий секрет-файл створить на його місці порожню директорію замість файлу, і Postgres впаде з помилкою "superuser password is not specified" (перевірено на реальному чистому клоні).
 
 Перевірка ідемпотентності сіда (кількість рядків не змінюється після повторного запуску):
@@ -225,11 +275,17 @@ docker compose exec -T postgres psql -U marketplace -d marketplace -Atc "SELECT 
 | `src/database/`                | `pg.Pool` з паролем-функцією, що читає файл-секрет |
 | `src/health/`                  | Ендпоінт `/health` (стан БД + uptime)            |
 | `src/entities/`                | TypeORM entities схеми з ДЗ №12 (`User`, `Product`, `Order`, `OrderItem`) |
-| `src/migrations/`              | Згенеровані TypeORM-міграції (`Init`, `AddProductsNameUnique`) |
+| `src/migrations/`              | Згенеровані TypeORM-міграції (`Init`, `AddProductsNameUnique`, `OrdersOrderItemsIndexes`, `CheckoutSchema`) |
 | `src/data-source.ts`           | `DataSource` для TypeORM CLI та скриптів: `synchronize: false`, конфіг з `process.env` |
 | `src/seed.ts`                  | Детермінований ідемпотентний seed (users/products через `upsert`, orders/order_items — за guard'ом на існуючий count) |
 | `src/demo-nplus1.ts`           | Демо проблеми N+1 і трьох способів фіксу, з власним `Logger`-лічильником запитів |
 | `src/report.ts`                | Звіт "топ товарів за виторгом" через `createQueryBuilder().getRawMany()` |
+| `src/checkout.ts`              | Транзакційна бізнес-операція "оформити замовлення": атомарний decrement stock/balance, запис Order+OrderItem+задачі в чергу |
+| `src/entities/post-processing-job.entity.ts` | Entity черги задач на постобробку замовлення (лист/чек) |
+| `src/lib/sleep.ts`             | Допоміжна `sleep()` для імітації роботи та backoff при retry |
+| `src/demo-race.ts`             | 50 паралельних `checkout()` на один товар — демонстрація захисту від oversell |
+| `src/demo-workers.ts`          | Воркер-пул, що розбирає чергу задач через `FOR UPDATE SKIP LOCKED` |
+| `src/demo-retry.ts`            | Провокує `40001` під `REPEATABLE READ` і демонструє повний retry транзакції |
 | `db/schema.sql`                | Таблиці курсового домену (`users`, `products`, `orders`, `order_items`) + constraints |
 | `db/seed.sql`                  | Генерація ~120 000 замовлень і пов'язаних даних, `VACUUM (ANALYZE)` наприкінці |
 | `db/queries/q1.sql, q2.sql, q3.sql` | Три "важкі" запити (власник+період, статус, регістронезалежний пошук) |
@@ -239,7 +295,7 @@ docker compose exec -T postgres psql -U marketplace -d marketplace -Atc "SELECT 
 | `secrets/db_password.example`  | Шаблон секрету для свіжого клону/грейдера        |
 | `scripts/check-env-example.mjs`| Звірка `.env.example` зі схемою (`npm run check:env`) |
 | `scripts/with-secrets.sh`      | Обгортка, що підтягує `DB_PASSWORD` із `secrets/db_password` перед будь-якою командою до бази (пропускається при `SKIP_VAULT=1`) |
-| `package.json`                 | Скрипти `build`, `migrate`, `migrate:show`, `migrate:revert`, `seed`, `demo:nplus1`, `report` |
+| `package.json`                 | Скрипти `build`, `migrate`, `migrate:show`, `migrate:revert`, `seed`, `demo:nplus1`, `report`, `demo:race`, `demo:workers`, `demo:retry` |
 | `docker-compose.yml`           | PostgreSQL для локальної розробки, `db/` змонтована в контейнер як `/db` |
 | `Dockerfile` + `.dockerignore` | Production-образ застосунку (multi-stage), без секретів у шарах |
 | `rotate.sh`                    | Ротація пароля БД без рестарту                   |

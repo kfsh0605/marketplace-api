@@ -12,6 +12,9 @@ export class Product {
     @Column({ type: 'int' })
     priceCents: number;
 
+    @Column({ type: 'int', default: 0 })
+    stock: number;
+
     @Column({ default: 'UAH' })
     currency: string;
 
