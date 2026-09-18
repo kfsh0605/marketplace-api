@@ -22,4 +22,12 @@ if [ ! -f "$CREDS" ]; then
 fi
 export DB_PASSWORD="$(tr -d '\n' < "$CREDS")"
 
+# ДЗ №15: єдиний DATABASE_URL для scripts/backup.sh і scripts/restore-drill.sh,
+# зібраний із тих самих полів, якими вже користується застосуток. Пароль
+# URL-кодуємо (у ньому є "/", який ламає звичайний postgres://user:pass@... рядок).
+if [ -z "${DATABASE_URL:-}" ]; then
+  ENC_PASSWORD="$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$DB_PASSWORD")"
+  export DATABASE_URL="postgres://${DB_USER}:${ENC_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+fi
+
 exec "$@"
