@@ -147,3 +147,5 @@ spec.json
 secrets/db_password
 
 .npmrc
+
+backups/
