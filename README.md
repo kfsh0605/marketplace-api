@@ -40,11 +40,11 @@ npm install
 |-----------------|:-----------:|----------------------------------------------------|
 | `PORT`          | ні (`3000` за замовч.) | Порт HTTP-сервера                        |
 | `NODE_ENV`      | ні (`development` за замовч.) | `development` \| `test` \| `production` |
-| `DB_HOST`       | так         | Хост PostgreSQL                                    |
-| `DB_PORT`       | ні (`5432` за замовч.) | Порт PostgreSQL                          |
+| `DB_HOST`       | так         | Хост PgBouncer (застосунок ходить у базу через PgBouncer, не напряму в Postgres) |
+| `DB_PORT`       | ні (`6432` за замовч.) | Порт PgBouncer (Postgres сам слухає 5432, але застосунок туди не ходить) |
 | `DB_USER`       | так         | Користувач PostgreSQL                              |
 | `DB_NAME`       | так         | Назва бази даних                                   |
-| `DATABASE_URL`  | ні          | Рядок підключення до БД одним рядком (контракт для сумісності з ДЗ #13 та інструментами на кшталт грейдера). **Джерело — сховище**: в реальному оточенні значення приходить із секрет-менеджера/змінних середовища платформи, а не з файлу в git. Сам застосунок (`src/database/database.module.ts`) продовжує підключатись через `DB_HOST`/`DB_PORT`/`DB_USER`/`DB_NAME` + файл-пароль нижче — `DATABASE_URL` цю логіку не замінює. |
+| `DATABASE_URL`  | ні          | Рядок підключення до БД одним рядком (контракт для сумісності з ДЗ #13/#15 та інструментами на кшталт грейдера, вказує на PgBouncer). **Джерело — сховище**: в реальному оточенні значення приходить із секрет-менеджера/змінних середовища платформи, а не з файлу в git. Сам застосунок (`src/data-source.ts`) продовжує підключатись через `DB_HOST`/`DB_PORT`/`DB_USER`/`DB_NAME` + файл-пароль нижче — `DATABASE_URL` цю логіку не замінює, ним користуються лише `scripts/backup.sh`/`scripts/restore-drill.sh` (див. "Data layer ops"). |
 
 Пароль PostgreSQL **не** є змінною середовища — він читається застосунком з файлу `secrets/db_password` (`src/database/database.module.ts`), причому файл перечитується заново при кожному новому підключенні до БД. Це і дозволяє міняти пароль без рестарту застосунку (див. розділ "Ротація" нижче).
 
@@ -55,7 +55,7 @@ npm install
 npm run check:env
 
 
-**Секрети:** `.env` і `secrets/db_password` ніколи не комітяться в git (див. `.gitignore`) і ніколи не потрапляють у Docker-образ (див. `.dockerignore`) — у самому образі є лише `.env.example` як довідковий шаблон. У `Dockerfile`/`docker-compose.yml` немає жодного реального значення секрету: Postgres теж отримує пароль через файл (`POSTGRES_PASSWORD_FILE`, той самий `secrets/db_password`), а не через змінну середовища. У git натомість лежить `secrets/db_password.example` — шаблон із заглушкою, з якого й копіюється реальний файл.
+**Секрети:** `.env` і `secrets/db_password` ніколи не комітяться в git (див. `.gitignore`) і ніколи не потрапляють у Docker-образ (див. `.dockerignore`) — у самому образі є лише `.env.example` як довідковий шаблон. У `Dockerfile`/`docker-compose.yml` немає жодного реального значення секрету: Postgres теж отримує пароль через файл (`POSTGRES_PASSWORD_FILE`, той самий `secrets/db_password`), а не через змінну середовища. У git натомість лежить `secrets/db_password.example` — шаблон із заглушкою, з якого й копіюється реальний файл. Той самий пароль (навмисно не є секретом, домовленість з ДЗ №11) прописаний і в `pgbouncer/userlist.txt` — інакше PgBouncer не зможе піднімати власне з'єднання до Postgres.
 
 ## Запуск
 
@@ -68,9 +68,9 @@ npm run start
 
 npm run start:dev
 
-Разом із Postgres через Docker Compose:
+Разом із Postgres та PgBouncer через Docker Compose:
 
-docker compose up -d
+docker compose up -d --wait
 npm run start:dev
 
 
@@ -94,6 +94,8 @@ npm run start:dev
 bash rotate.sh
 
 (на Windows — через Git Bash, який встановлюється разом із Git for Windows)
+
+Після ротації не забудь синхронно оновити пароль і в `pgbouncer/userlist.txt` — інакше PgBouncer не зможе підключитись до Postgres власним backend-з'єднанням (client-side автентифікація в PgBouncer і server-side підключення до Postgres використовують той самий пароль).
 
 Перевірити, що ротація пройшла без рестарту, можна порівнявши `uptime` в `/health` до і після:
 
@@ -224,15 +226,53 @@ docker compose exec -T postgres psql -U marketplace -d marketplace -Atc "SELECT 
     [A] спроба 1 впала з 40001 (serialization failure), повтор через 69 мс
     Фінальний баланс: 102000 (очікували 102000)
 
+Усі три демо перевірені повторно вже після ДЗ №15 — з тим самим результатом, але тепер увесь трафік фізично йде через PgBouncer (`pool_mode = transaction`, 8 реальних з'єднань до Postgres замість одного на кожен виклик застосунку): 50/10/0/0 для race, 3/3/3/3 без дублів і пропусків для workers (368 мс паралельно проти 1200 мс послідовно), спіймана `40001` і коректний фінальний баланс 102000 для retry.
+
+## Data layer ops: PgBouncer, backup і restore drill (ДЗ №15)
+
+### PgBouncer перед Postgres
+
+Клієнтські з'єднання (скільки одночасних запитів шле застосунок) і серверні з'єднання Postgres (реальні, дорогі, обмежені `max_connections`) — це різні речі. PgBouncer стоїть між ними і мультиплексує багато клієнтських з'єднань у невелику, стабільну кількість серверних. Конфіг — `pgbouncer/pgbouncer.ini` (монтується в контейнер як є, без генерації з env-змінних) і `pgbouncer/userlist.txt` (клієнтська автентифікація, `auth_type = scram-sha-256`, пароль збігається з паролем Postgres). Застосунок ходить у базу через `DB_HOST`/`DB_PORT=6432`, тобто через PgBouncer, а не напряму в Postgres (`5432`).
+
+Режим пулінгу — `pool_mode = transaction`: клієнт отримує реальне серверне з'єднання лише на час однієї транзакції, одразу після `COMMIT`/`ROLLBACK` це з'єднання може дістатись іншому клієнту. Це дає максимальну економію з'єднань, але ламає щонайменше три речі, які працюють в `session`-режимі:
+
+1. **Session-level стан** (`SET`, тимчасові таблиці, `LISTEN`/`NOTIFY`) не переживає межу транзакції — наступний запит клієнта може дістатись зовсім іншого фізичного з'єднання до Postgres, де цього стану ніколи не було.
+2. **Advisory locks**, узяті в одній транзакції і потрібні в наступній, ламаються з тієї ж причини — лок фізично належить конкретному серверному з'єднанню, а не клієнту.
+3. **Named prepared statements драйвера** прив'язані до конкретного серверного з'єднання; клієнт після транзакції може отримати інше — звідси `max_prepared_statements` у конфізі PgBouncer як запобіжник.
+
+`checkout()`, `demo:race`, `demo:workers` і `demo:retry` (ДЗ №14) із цим сумісні "з коробки": кожен з них — це рівно одна транзакція на виклик, без стану, що мав би пережити межу `COMMIT`, тому вони пройшли через PgBouncer без жодних змін у коді (див. цифри в розділі вище).
+
+Перевірка вручну:
+
+    docker compose up -d --wait
+    docker compose exec -e PGPASSWORD="$(cat secrets/db_password)" postgres psql -h pgbouncer -p 6432 -U marketplace -d marketplace -c "SELECT 1"
+    docker compose exec -e PGPASSWORD="$(cat secrets/db_password)" postgres psql -h pgbouncer -p 6432 -U marketplace -d pgbouncer -c "SHOW POOLS"
+
+### Backup
+
+`scripts/backup.sh` знімає `pg_dump -Fc` тим самим шляхом, яким ходить застосунок — через PgBouncer, `DATABASE_URL` з обгортки `with-secrets.sh`. Дамп кладеться в `backups/` (поза git, є в `.gitignore`) з датою в імені файлу, і одразу перевіряється через `pg_restore --list`, що архів валідний.
+
+    bash scripts/with-secrets.sh dev bash scripts/backup.sh
+
+Розклад — `backup.cron`, нічний бекап. Раз на добу означає чесний RPO "до 24 годин" — див. `RESTORE-DRILL.md`.
+
+### Restore drill
+
+`scripts/restore-drill.sh` бере останній дамп, піднімає повністю чистий, щойно створений контейнер Postgres (без жодного спільного стану з живою базою), відновлює туди дамп і звіряє контрольну суму ключової таблиці (`count(*) || sum(...)`) до і після. Друкує `MATCH` і виходить з кодом 0, якщо дані співпали; інакше — ненульовий код. Контейнер видаляється сам, незалежно від результату.
+
+    bash scripts/with-secrets.sh dev bash scripts/restore-drill.sh
+
+Результати реального прогону (дата, розмір дампу, виміряний RTO, чесний RPO) — `RESTORE-DRILL.md`.
+
 ## Grading
 
 Грейдер (і будь-хто на свіжому клоні без доступу до сховища секретів) виконує рівно ці команди з кореня репозиторію:
 
     cp secrets/db_password.example secrets/db_password
     export DB_HOST=127.0.0.1
-    export DB_PORT=5432
+    export DB_PORT=6432
     export DB_USER=marketplace
-    export DB_PASSWORD=dev_password_change_me
+    export DB_PASSWORD=VgiPEzaFq/5KKivNpzGqUnko2bXMpiT2
     export DB_NAME=marketplace
     export SKIP_VAULT=1    # у грейдера немає доступу до сховища
     docker compose up -d --wait
@@ -257,7 +297,18 @@ docker compose exec -T postgres psql -U marketplace -d marketplace -Atc "SELECT 
     npm run demo:workers
     npm run demo:retry
 
-`DB_PASSWORD=dev_password_change_me` — те саме dev-значення, що лежить у `secrets/db_password.example` і завжди використовується для локальної розробки; воно навмисно не є секретом (домовленість з ДЗ №11). Крок `cp secrets/db_password.example secrets/db_password` обов'язковий: без нього Docker при спробі змонтувати неіснуючий секрет-файл створить на його місці порожню директорію замість файлу, і Postgres впаде з помилкою "superuser password is not specified" (перевірено на реальному чистому клоні).
+    psql -h 127.0.0.1 -p 6432 -U marketplace -d marketplace -c "SELECT 1"
+    psql -h 127.0.0.1 -p 6432 -U marketplace -d pgbouncer -c "SHOW POOLS"
+
+    export DATABASE_URL=postgres://marketplace:VgiPEzaFq%2F5KKivNpzGqUnko2bXMpiT2@127.0.0.1:6432/marketplace
+    bash scripts/with-secrets.sh dev bash scripts/backup.sh
+    bash scripts/with-secrets.sh dev bash scripts/restore-drill.sh
+
+`DB_PASSWORD=VgiPEzaFq/5KKivNpzGqUnko2bXMpiT2` — те саме dev-значення, що лежить у `secrets/db_password.example`, `pgbouncer/userlist.txt` і завжди використовується для локальної розробки; воно навмисно не є секретом (домовленість з ДЗ №11). У `DATABASE_URL` той самий пароль йде вже URL-кодованим (`%2F` замість `/`) — інакше `/` в паролі зламав би розбір рядка підключення. Крок `cp secrets/db_password.example secrets/db_password` обов'язковий: без нього Docker при спробі змонтувати неіснуючий секрет-файл створить на його місці порожню директорію замість файлу, і Postgres впаде з помилкою "superuser password is not specified" (перевірено на реальному чистому клоні).
+
+Якщо `psql` немає на машині грейдера локально — той самий `SELECT 1`/`SHOW POOLS` перевіряється зсередини вже запущеного контейнера `postgres`, який має власний psql-клієнт:
+
+    docker compose exec -e PGPASSWORD="$DB_PASSWORD" postgres psql -h pgbouncer -p 6432 -U marketplace -d marketplace -c "SELECT 1"
 
 Перевірка ідемпотентності сіда (кількість рядків не змінюється після повторного запуску):
 
@@ -286,16 +337,23 @@ docker compose exec -T postgres psql -U marketplace -d marketplace -Atc "SELECT 
 | `src/demo-race.ts`             | 50 паралельних `checkout()` на один товар — демонстрація захисту від oversell |
 | `src/demo-workers.ts`          | Воркер-пул, що розбирає чергу задач через `FOR UPDATE SKIP LOCKED` |
 | `src/demo-retry.ts`            | Провокує `40001` під `REPEATABLE READ` і демонструє повний retry транзакції |
+| `pgbouncer/pgbouncer.ini`      | Конфіг PgBouncer: `pool_mode = transaction`, `admin_users`, монтується в контейнер як є |
+| `pgbouncer/userlist.txt`       | Клієнтська автентифікація PgBouncer (`scram-sha-256`), пароль синхронізовано з Postgres |
+| `scripts/lib/parse-database-url.sh` | Розбір `$DATABASE_URL` на складові через `URL` з Node.js (не bash-регулярками — у паролі є `/`) |
+| `scripts/backup.sh`            | `pg_dump -Fc` через PgBouncer, дата в імені файлу, перевірка архіву `pg_restore --list` |
+| `scripts/restore-drill.sh`     | Відновлення останнього дампу в чистий одноразовий контейнер, звірка контрольної суми до/після, вимір RTO |
+| `backup.cron`                  | Розклад нічного бекапу (RPO ≈ до 24 годин) |
+| `RESTORE-DRILL.md`             | Протокол реального прогону restore drill: дата, розмір, RTO, RPO |
 | `db/schema.sql`                | Таблиці курсового домену (`users`, `products`, `orders`, `order_items`) + constraints |
 | `db/seed.sql`                  | Генерація ~120 000 замовлень і пов'язаних даних, `VACUUM (ANALYZE)` наприкінці |
 | `db/queries/q1.sql, q2.sql, q3.sql` | Три "важкі" запити (власник+період, статус, регістронезалежний пошук) |
 | `db/indexes.sql`               | Індекси-ліки для цих трьох запитів (composite, partial, expression) |
 | `db/OPTIMIZATIONS.md`          | `EXPLAIN (ANALYZE, BUFFERS)` до/після по кожному запиту |
 | `secrets/db_password`          | Файл-секрет з паролем PostgreSQL (у `.gitignore`)|
-| `secrets/db_password.example`  | Шаблон секрету для свіжого клону/грейдера        |
+| `secrets/db_password.example`  | Шаблон секрету для свіжого клону/грейдера (той самий пароль, що й у `pgbouncer/userlist.txt`) |
 | `scripts/check-env-example.mjs`| Звірка `.env.example` зі схемою (`npm run check:env`) |
-| `scripts/with-secrets.sh`      | Обгортка, що підтягує `DB_PASSWORD` із `secrets/db_password` перед будь-якою командою до бази (пропускається при `SKIP_VAULT=1`) |
+| `scripts/with-secrets.sh`      | Обгортка: підтягує `DB_PASSWORD` із `secrets/db_password` і збирає `DATABASE_URL` перед будь-якою командою до бази (пропускається при `SKIP_VAULT=1`) |
 | `package.json`                 | Скрипти `build`, `migrate`, `migrate:show`, `migrate:revert`, `seed`, `demo:nplus1`, `report`, `demo:race`, `demo:workers`, `demo:retry` |
-| `docker-compose.yml`           | PostgreSQL для локальної розробки, `db/` змонтована в контейнер як `/db` |
+| `docker-compose.yml`           | PostgreSQL + PgBouncer (`pool_mode = transaction`) для локальної розробки, `db/` змонтована в контейнер як `/db` |
 | `Dockerfile` + `.dockerignore` | Production-образ застосунку (multi-stage), без секретів у шарах |
-| `rotate.sh`                    | Ротація пароля БД без рестарту                   |
+| `rotate.sh`                    | Ротація пароля БД без рестарту (пам'ятай синхронно оновити `pgbouncer/userlist.txt`) |
