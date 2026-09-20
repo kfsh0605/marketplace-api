@@ -14,11 +14,15 @@ fi
 DUMP_SIZE_BYTES=$(wc -c < "$LATEST_DUMP" | tr -d ' ')
 echo "Останній дамп: $LATEST_DUMP (${DUMP_SIZE_BYTES} bytes)"
 
-CHECKSUM_SQL="SELECT count(*) || '|' || COALESCE(sum(\"priceCents\"), 0) FROM products;"
+CHECKSUM_FILE="${LATEST_DUMP}.checksum"
+if [ ! -f "$CHECKSUM_FILE" ]; then
+  echo "restore-drill.sh: не знайдено $CHECKSUM_FILE. Цей дамп зроблено старою версією backup.sh — перестворіть дамп." >&2
+  exit 1
+fi
+BEFORE_CHECKSUM="$(cat "$CHECKSUM_FILE")"
+echo "BEFORE (checksum, збережений у момент backup.sh): $BEFORE_CHECKSUM"
 
-BEFORE_CHECKSUM="$(docker compose exec -T -e PGPASSWORD="$DB_URL_PASS" postgres \
-  psql -h pgbouncer -p 6432 -U "$DB_URL_USER" -d "$DB_URL_NAME" -tAc "$CHECKSUM_SQL" | tr -d '[:space:]')"
-echo "BEFORE (жива база через PgBouncer): $BEFORE_CHECKSUM"
+CHECKSUM_SQL="SELECT count(*) || '|' || COALESCE(sum(\"priceCents\"), 0) FROM products;"
 
 DRILL_CONTAINER="restore-drill-$(date +%s)-$$"
 cleanup() {
