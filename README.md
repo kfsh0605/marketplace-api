@@ -287,6 +287,12 @@ NestJS 12 публікується як чистий ESM-пакет (`"type": "m
 
 ## Contract-тестування: Pact, Pact Broker, can-i-deploy (ДЗ №16, п.4-6)
 
+### CI
+
+Той самий gate автоматизований у `.github/workflows/ci.yml`: джоба `test` (type-check, integration, e2e) → джоба `contract` (публікація контракту, верифікація провайдера з `publishVerificationResult: true`, тегування версії провайдера як `prod`, `can-i-deploy`). Якщо `can-i-deploy` поверне не `true` — джоба падає, і мердж/деплой блокується.
+
+Для кроків, які піднімають повний Nest-застосунок (E2E-тести, верифікація провайдера), потрібні значення `DB_HOST`/`DB_USER`/`DB_NAME` — вони проходять первинну валідацію конфігурації ще до старту testcontainer-а з реальною базою (яка вже після старту підміняє ці значення на справжні). Локально їх дає файл `.env`; у CI — заглушки прямо в `ci.yml`, оскільки на цьому етапі важливий лише факт наявності рядка, а не його вміст.
+
 ### Consumer-контракт і верифікація провайдера
 
 Consumer-тест (`test/contract/products.consumer.spec.ts`) описує очікування уявного фронтенду (`MarketplaceWebClient`) від ендпойнта `GET /products/:id` і генерує файл контракту `pacts/MarketplaceWebClient-MarketplaceApi.json`:
