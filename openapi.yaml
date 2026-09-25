@@ -1,0 +1,253 @@
+openapi: 3.0.0
+paths:
+  /products:
+    get:
+      operationId: listProducts
+      parameters:
+        - name: limit
+          required: false
+          in: query
+          description: Максимальна кількість елементів на сторінці
+          schema:
+            type: number
+        - name: cursor
+          required: false
+          in: query
+          description: Курсор для пагінації
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductListResponse'
+      summary: Отримати список товарів
+      tags:
+        - products
+  /products/{productId}:
+    get:
+      operationId: getProduct
+      parameters:
+        - name: productId
+          required: true
+          in: path
+          schema:
+            example: p-1
+            type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+      summary: Отримати товар за id
+      tags:
+        - products
+  /orders:
+    get:
+      operationId: listOrders
+      parameters:
+        - name: limit
+          required: false
+          in: query
+          schema:
+            type: number
+        - name: cursor
+          required: false
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderListResponse'
+      summary: Отримати список замовлень
+      tags:
+        - orders
+    post:
+      operationId: createOrder
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          description: >-
+            Унікальний ключ, який клієнт генерує самостійно для запобігання
+            дублюванню замовлень при повторній відправці одного й того самого
+            запиту (наприклад, при повторній спробі після таймауту мережі). Той
+            самий ключ з тим самим тілом запиту поверне збережену раніше
+            відповідь замість створення нового замовлення.
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderDto'
+      responses:
+        '201':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+      summary: Створити нове замовлення
+      tags:
+        - orders
+  /orders/{orderId}:
+    get:
+      operationId: getOrder
+      parameters:
+        - name: orderId
+          required: true
+          in: path
+          schema:
+            example: o-1
+            type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+      summary: Отримати замовлення за id
+      tags:
+        - orders
+  /health:
+    get:
+      operationId: getHealth
+      parameters: []
+      responses:
+        '503':
+          description: Базу даних недоступна
+      summary: Перевірка стану застосунку та підключення до БД
+      tags:
+        - health
+info:
+  title: Marketplace API
+  description: 'API для навчального курсового проєкту: товари та замовлення'
+  version: 1.0.0
+  contact: {}
+tags: []
+servers:
+  - url: http://localhost:3000
+    description: Локальний сервер розробки
+components:
+  schemas:
+    Product:
+      type: object
+      properties:
+        id:
+          type: string
+          example: p-1
+          description: Ідентифікатор товару
+        name:
+          type: string
+          example: Клавіатура
+          description: Назва товару
+        priceCents:
+          type: number
+          example: 45000
+          description: Ціна в найменших одиницях валюти (копійках)
+        currency:
+          type: string
+          example: UAH
+          description: Код валюти
+      required:
+        - id
+        - name
+        - priceCents
+        - currency
+    ProductListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Product'
+        next_cursor:
+          type: string
+          example: null
+          nullable: true
+          description: Курсор для наступної сторінки або null, якщо сторінка остання
+      required:
+        - items
+        - next_cursor
+    OrderItemDto:
+      type: object
+      properties:
+        productId:
+          type: string
+          example: p-1
+          description: Ідентифікатор товару
+        quantity:
+          type: number
+          example: 2
+          minimum: 1
+          description: Кількість одиниць товару
+      required:
+        - productId
+        - quantity
+    Order:
+      type: object
+      properties:
+        id:
+          type: string
+          example: o-1
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItemDto'
+        totalCents:
+          type: number
+          example: 90000
+          description: Загальна сума замовлення в копійках
+        currency:
+          type: string
+          example: UAH
+        status:
+          type: string
+          example: created
+      required:
+        - id
+        - items
+        - totalCents
+        - currency
+        - status
+    OrderListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Order'
+        next_cursor:
+          type: string
+          example: null
+          nullable: true
+          description: Курсор для наступної сторінки або null, якщо сторінка остання
+      required:
+        - items
+        - next_cursor
+    CreateOrderDto:
+      type: object
+      properties:
+        customerEmail:
+          type: string
+          example: ada@example.com
+          description: Email клієнта, що оформлює замовлення
+        items:
+          minItems: 1
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItemDto'
+      required:
+        - customerEmail
+        - items

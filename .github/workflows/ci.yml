@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'hw-*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Integration tests
+        run: npm run test:integration
+
+      - name: E2E tests
+        run: npm run test:e2e
+
+  contract:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Placeholder secret file for compose parsing
+        run: |
+          mkdir -p secrets
+          echo "unused-in-ci" > secrets/db_password
+
+      - name: Start Pact Broker
+        run: docker compose up -d --wait pact-broker-db pact-broker
+
+      - name: Generate consumer contract
+        run: npm run test:contract
+
+      - name: Publish contract to Pact Broker
+        env:
+          PACT_VERSION: ${{ github.sha }}
+        run: |
+          curl -sS -f -X PUT \
+            -H "Content-Type: application/json" \
+            --data-binary "@pacts/MarketplaceWebClient-MarketplaceApi.json" \
+            "http://127.0.0.1:9292/pacts/provider/MarketplaceApi/consumer/MarketplaceWebClient/version/${PACT_VERSION}"
+
+      - name: Verify provider against broker
+        env:
+          PACT_BROKER_URL: http://127.0.0.1:9292
+          PACT_BROKER_TOKEN: ${{ secrets.PACT_BROKER_TOKEN }}
+          PACT_PROVIDER_VERSION: ${{ github.sha }}
+        run: npm run verify:provider
+
+      - name: Tag verified provider version as prod
+        env:
+          PACT_VERSION: ${{ github.sha }}
+        run: |
+          curl -sS -f -X PUT \
+            -H "Content-Type: application/json" \
+            "http://127.0.0.1:9292/pacticipants/MarketplaceApi/versions/${PACT_VERSION}/tags/prod"
+
+      - name: can-i-deploy gate
+        env:
+          PACT_VERSION: ${{ github.sha }}
+        run: |
+          response=$(curl -sS "http://127.0.0.1:9292/can-i-deploy?pacticipant=MarketplaceWebClient&version=${PACT_VERSION}&to=prod")
+          echo "$response"
+          deployable=$(echo "$response" | jq -r '.summary.deployable')
+          if [ "$deployable" != "true" ]; then
+            echo "can-i-deploy: deployable=$deployable — блокуємо деплой"
+            exit 1
+          fi

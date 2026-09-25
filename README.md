@@ -264,6 +264,102 @@ docker compose exec -T postgres psql -U marketplace -d marketplace -Atc "SELECT 
 
 Результати реального прогону (дата, розмір дампу, виміряний RTO, чесний RPO) — `RESTORE-DRILL.md`.
 
+## Тестування: integration, E2E (ДЗ №16)
+
+Два незалежні шари тестів, кожен зі своєю моделлю ізоляції:
+
+    npm run test:integration   # репозиторії проти реального Postgres у testcontainer
+    npm run test:e2e           # повний Nest-застосунок (supertest) проти testcontainer
+
+Обидва проєкти описані в `jest.config.js` (multi-project конфіг), кожен піднімає власний одноразовий контейнер `postgres:16-alpine` і прожене на ньому реальні міграції — жодних моків БД, тестується справжній SQL і справжня схема.
+
+### Чому TRUNCATE, а не ROLLBACK, для ізоляції між тестами
+
+Для очищення стану між тестами в межах одного testcontainer розглядались два варіанти: відкочувати транзакцію після кожного тесту (`ROLLBACK`) або зачищати таблиці командою `TRUNCATE ... RESTART IDENTITY CASCADE`. Обрано другий варіант. `ROLLBACK`-підхід вимагає, щоб і сам тест, і увесь код, який він викликає, працювали через один і той самий `QueryRunner` з відкритою транзакцією — а в наших даних чотири пов'язані таблиці (`users → orders → order_items → products`) і сервіси, що самі відкривають власні транзакції (`manager.transaction(...)` в `OrdersService`), тому "протягнути" один спільний `QueryRunner` через усі шари виявляється громіздкіше, ніж просто зачистити таблиці між тестами. `TRUNCATE ... RESTART IDENTITY CASCADE` виконується один раз між тестами, скидає авто-інкременти (щоб id в очікуваннях тестів були передбачуваними) і коректно каскадно чистить залежні таблиці за FK.
+
+### Чому @nestjs/* закріплені на 11.x, а не 12.x
+
+NestJS 12 публікується як чистий ESM-пакет (`"type": "module"` у package.json кожного з `@nestjs/*` пакетів) — це свідоме архітектурне рішення команди Nest, а не помилка складання. Jest 30 має нативну підтримку `require(esm)` для Node.js 24.9+, але на практиці для графа залежностей `@nestjs/testing` → `@nestjs/common` цей fallback у зв'язці Jest 30.5.2 + Node 24.20 не спрацював (файл коректно резолвиться і навіть проганяється через кастомний трансформер, але Jest все одно відмовляється виконати його як CommonJS). Офіційний migration-guide Nest прямо допускає залишитися на CommonJS-версії без втрати функціональності ("your CommonJS project stays a CommonJS project"), тому для сумісності з Jest (вимога завдання) увесь стек `@nestjs/*` закріплено на останній CommonJS-версії (11.2.6 для common/core/platform-express/testing, 11.4.7 для swagger, 11.0.3 для typeorm, 4.0.4 для config — цей пакет синхронізував нумерацію версій з ядром саме на релізі 12.x). На "бойовий" код застосунку (декоратори, DI, TypeORM-інтеграцію) це ніяк не впливає — API між 11.x і 12.x у цій частині ідентичне.
+
+### E2E без підміни провайдерів
+
+`test/e2e/testkit/bootstrap-app.ts` піднімає справжній `AppModule` через `Test.createTestingModule({ imports: [AppModule] }).compile()` — без жодних `overrideProvider`. "Ін'єкція" testcontainer-бази відбувається не через DI, а через змінну середовища `DATABASE_URL`, яку `src/database/pg-connection-options.ts` розпізнає з вищим пріоритетом за `DB_HOST`/`DB_PORT`/`DB_USER`/`DB_NAME` + файл-пароль — той самий механізм, яким у проді користується `DATABASE_URL` для `scripts/backup.sh` (ДЗ №15). Завдяки цьому e2e-тести і продакшн-застосунок збирають з'єднання до бази однаковим кодом.
+
+## Contract-тестування: Pact, Pact Broker, can-i-deploy (ДЗ №16, п.4-6)
+
+### Consumer-контракт і верифікація провайдера
+
+Consumer-тест (`test/contract/products.consumer.spec.ts`) описує очікування уявного фронтенду (`MarketplaceWebClient`) від ендпойнта `GET /products/:id` і генерує файл контракту `pacts/MarketplaceWebClient-MarketplaceApi.json`:
+
+    npm run test:contract
+
+Provider verification (`test/contract/verify-provider.ts`) піднімає справжній застосунок (той самий testcontainers-стенд, що і в E2E), сідить у БД товар через `stateHandlers`, і ганяє реальні HTTP-запити проти нього, звіряючи відповідь із контрактом:
+
+    npm run verify:provider
+
+Без `PACT_BROKER_URL` в env скрипт верифікує проти локального файлу `pacts/*.json`. З виставленим `PACT_BROKER_URL` — тягне контракт із брокера і публікує результат верифікації назад.
+
+### OpenAPI-специфікація
+
+`openapi.yaml` в корені репозиторію генерується зі спільної Swagger-конфігурації (`src/swagger-config.ts`), яка також використовується в `src/main.ts`:
+
+    npm run generate:openapi
+
+Шлях і форма відповіді в consumer-інтеракції відповідають ендпойнту `/products/{productId}` з цієї специфікації.
+
+### Pact Broker локально
+
+У `docker-compose.yml` є два додаткові сервіси: `pact-broker-db` (окрема Postgres-база тільки для брокера, щоб не чіпати схему застосунку) і `pact-broker` (офіційний образ `pactfoundation/pact-broker`, порт `9292`). Підняти:
+
+    docker compose up -d --wait
+
+Брокер буде доступний на `http://127.0.0.1:9292`.
+
+### Секрети
+
+`PACT_BROKER_URL` за замовчуванням вказує на локальний `http://127.0.0.1:9292` — це не секрет, тому його можна відкрито тримати в конфігурації. `PACT_BROKER_TOKEN` потрібен лише якщо брокер вимагає авторизацію (наприклад, хмарний PactFlow); код читає його виключно з `process.env.PACT_BROKER_TOKEN` і ніколи не хардкодить. Локально токен (якщо потрібен) приїжджає через ту саму обгортку, що й інші секрети з ДЗ №11/13:
+
+    bash scripts/with-secrets.sh dev npm run verify:provider
+
+У CI — через `secrets.PACT_BROKER_TOKEN` в GitHub Actions.
+
+### Демонстрація can-i-deploy gate
+
+Послідовність команд:
+
+    docker compose up -d --wait
+    curl -i -X PUT -H "Content-Type: application/json" --data-binary "@pacts/MarketplaceWebClient-MarketplaceApi.json" "http://127.0.0.1:9292/pacts/provider/MarketplaceApi/consumer/MarketplaceWebClient/version/0.1.0"
+    curl -s "http://127.0.0.1:9292/can-i-deploy?pacticipant=MarketplaceWebClient&version=0.1.0&to=prod"
+    PACT_BROKER_URL=http://127.0.0.1:9292 PACT_PROVIDER_VERSION=0.1.0 npm run verify:provider
+    curl -i -X PUT -H "Content-Type: application/json" "http://127.0.0.1:9292/pacticipants/MarketplaceApi/versions/0.1.0/tags/prod"
+    curl -s "http://127.0.0.1:9292/can-i-deploy?pacticipant=MarketplaceWebClient&version=0.1.0&to=prod"
+
+**До верифікації і тегування провайдера** (контракт опубліковано, але ще нема ні підтвердженої відповідності, ні версії провайдера з тегом `prod`):
+
+    {
+      "summary": {
+        "deployable": null,
+        "reason": "There is no verified pact between version 0.1.0 of MarketplaceWebClient and the latest version of MarketplaceApi with tag prod (no such version exists)",
+        "success": 0,
+        "failed": 0,
+        "unknown": 1
+      }
+    }
+
+**Після верифікації провайдера і тегування його версії `0.1.0` як `prod`:**
+
+    {
+      "summary": {
+        "deployable": true,
+        "reason": "All required verification results are published and successful",
+        "success": 1,
+        "failed": 0,
+        "unknown": 0
+      }
+    }
+
+Різниця між цими двома відповідями і є сенсом gate'а: брокер каже "не знаю", доки нема опублікованого успішного результату верифікації для тієї версії провайдера, яка позначена як production, і каже "можна" тільки після цього.
+
 ## Grading
 
 Грейдер (і будь-хто на свіжому клоні без доступу до сховища секретів) виконує рівно ці команди з кореня репозиторію:
@@ -355,5 +451,8 @@ docker compose exec -T postgres psql -U marketplace -d marketplace -Atc "SELECT 
 | `scripts/with-secrets.sh`      | Обгортка: підтягує `DB_PASSWORD` із `secrets/db_password` і збирає `DATABASE_URL` перед будь-якою командою до бази (пропускається при `SKIP_VAULT=1`) |
 | `package.json`                 | Скрипти `build`, `migrate`, `migrate:show`, `migrate:revert`, `seed`, `demo:nplus1`, `report`, `demo:race`, `demo:workers`, `demo:retry` |
 | `docker-compose.yml`           | PostgreSQL + PgBouncer (`pool_mode = transaction`) для локальної розробки, `db/` змонтована в контейнер як `/db` |
+| `test/integration/`            | Integration-тести репозиторіїв проти testcontainer-Postgres (TRUNCATE-ізоляція між тестами) |
+| `test/e2e/`                    | E2E-тести повного Nest-застосунку через supertest, без підміни провайдерів |
+| `jest.config.js`               | Multi-project конфіг Jest: `integration`, `e2e`, `contract` |
 | `Dockerfile` + `.dockerignore` | Production-образ застосунку (multi-stage), без секретів у шарах |
 | `rotate.sh`                    | Ротація пароля БД без рестарту (пам'ятай синхронно оновити `pgbouncer/userlist.txt`) |
