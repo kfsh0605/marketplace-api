@@ -1,33 +1,18 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
-import { ProblemExceptionFilter } from './common/filters/problem-exception.filter';
+import { configureApp } from './configure-app';
+import { buildSwaggerConfig } from './swagger-config';
 import { Env } from './config/env.schema';
 
 async function bootstrap() {
     const app = await NestFactory.create(AppModule);
 
-    app.useGlobalPipes(
-        new ValidationPipe({
-            whitelist: true,
-            forbidNonWhitelisted: true,
-            transform: true,
-        }),
-    );
+    configureApp(app);
 
-    app.useGlobalFilters(new ProblemExceptionFilter());
-
-    const config = new DocumentBuilder()
-        .setTitle('Marketplace API')
-        .setDescription('API для навчального курсового проєкту: товари та замовлення')
-        .setVersion('1.0.0')
-        .addServer('http://localhost:3000', 'Локальний сервер розробки')
-        .build();
-
-    const document = SwaggerModule.createDocument(app, config);
+    const document = SwaggerModule.createDocument(app, buildSwaggerConfig());
     SwaggerModule.setup('docs', app, document);
 
     const configService = app.get(ConfigService<Env, true>);
