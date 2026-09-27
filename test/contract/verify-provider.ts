@@ -5,8 +5,6 @@ import { DataSource } from 'typeorm';
 import { bootstrapE2eApp } from '../e2e/testkit/bootstrap-app';
 import { Product } from '../../src/entities/product.entity';
 
-const PROVIDER_PORT = 3123;
-
 async function seedContractProduct(dataSource: DataSource): Promise<void> {
     const repo = dataSource.getRepository(Product);
     const existing = await repo.findOneBy({ id: 1 });
@@ -26,14 +24,15 @@ async function seedContractProduct(dataSource: DataSource): Promise<void> {
 
 async function main(): Promise<void> {
     const e2e = await bootstrapE2eApp();
-    await e2e.app.listen(PROVIDER_PORT);
+    await e2e.app.listen(0);
+    const providerBaseUrl = await e2e.app.getUrl();
 
     const brokerUrl = process.env.PACT_BROKER_URL;
     const providerVersion = process.env.PACT_PROVIDER_VERSION || '0.0.0-local';
 
     const verifier = new Verifier({
         provider: 'MarketplaceApi',
-        providerBaseUrl: `http://127.0.0.1:${PROVIDER_PORT}`,
+        providerBaseUrl,
         stateHandlers: {
             'Товар з id=1 існує в каталозі': async () => {
                 await seedContractProduct(e2e.dataSource);

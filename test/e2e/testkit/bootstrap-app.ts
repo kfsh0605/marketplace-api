@@ -2,7 +2,7 @@ import { Test } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { DataSource } from 'typeorm';
-import { AppModule } from '../../../src/app.module';
+import type { AppModule as AppModuleType } from '../../../src/app.module';
 import { configureApp } from '../../../src/configure-app';
 import { User } from '../../../src/entities/user.entity';
 import { Product } from '../../../src/entities/product.entity';
@@ -44,6 +44,7 @@ export async function bootstrapE2eApp(): Promise<E2eApp> {
     process.env.DB_HOST = 'e2e-placeholder';
     process.env.DB_USER = 'e2e-placeholder';
     process.env.DB_NAME = 'e2e-placeholder';
+    const { AppModule } = require('../../../src/app.module') as { AppModule: typeof AppModuleType };
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     const app = moduleRef.createNestApplication();

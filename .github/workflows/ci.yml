@@ -27,7 +27,9 @@ jobs:
         run: npm ci
 
       - name: Type-check
-        run: npx tsc --noEmit
+        run: |
+          npx tsc --noEmit
+          npx tsc --noEmit -p test/tsconfig.json
 
       - name: Integration tests
         run: npm run test:integration
