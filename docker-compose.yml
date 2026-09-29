@@ -31,8 +31,41 @@ services:
     ports:
       - "6432:6432"
 
+  pact-broker-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: pact_broker
+      POSTGRES_PASSWORD: pact_broker
+      POSTGRES_DB: pact_broker
+    volumes:
+      - pact_broker_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pact_broker"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pact-broker:
+    image: pactfoundation/pact-broker:latest
+    ports:
+      - "9292:9292"
+    environment:
+      PACT_BROKER_DATABASE_URL: postgres://pact_broker:pact_broker@pact-broker-db:5432/pact_broker
+      PACT_BROKER_PORT: "9292"
+      PACT_BROKER_LOG_LEVEL: WARN
+      PACT_BROKER_ALLOW_PUBLIC_READ: "true"
+    depends_on:
+      pact-broker-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:9292/diagnostic/status/heartbeat"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
   pgdata:
+  pact_broker_db_data:
 
 secrets:
   db_password:

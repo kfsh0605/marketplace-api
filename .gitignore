@@ -149,3 +149,10 @@ secrets/db_password
 .npmrc
 
 backups/
+
+# Скомпільовані тестові артефакти (іноді залишаються поруч із .ts після tsc/ts-jest)
+test/**/*.js
+test/**/*.js.map
+
+# Pact-контракти — перегенеровуються командою `npm run test:contract`
+pacts/
