@@ -417,6 +417,51 @@ Provider verification (`test/contract/verify-provider.ts`) піднімає сп
     docker compose exec -T postgres psql -U marketplace -d marketplace -Atc \
       "SELECT (SELECT count(*) FROM users) AS users, (SELECT count(*) FROM products) AS products, (SELECT count(*) FROM orders) AS orders, (SELECT count(*) FROM order_items) AS order_items;"
 
+## Realtime: WebSocket + SSE (ДЗ №18)
+
+Покупець дізнається про зміну статусу свого замовлення миттєво, без перезавантаження сторінки — двома транспортами: WebSocket-кімнати (`socket.io`) та SSE-потік з підтримкою `Last-Event-ID`. Обидва транспорти живляться з однієї спільної шини подій (`OrderEventsService`), а не з двох незалежних джерел.
+
+### Запуск
+
+    npm run build
+    npm run start          # застосунок на http://localhost:3000
+
+Далі, в окремому терміналі — сидовані дані обов'язкові, бо демо і curl-перевірки нижче спираються на конкретних власників конкретних замовлень:
+
+    npm run migrate
+    npm run seed
+
+### Перевірка SSE вручну
+
+    curl -sN --max-time 5 http://localhost:3000/orders/1/events
+
+В іншому терміналі змінити статус — подія прилетить у перший термінал:
+
+    curl -X PATCH http://localhost:3000/orders/1/status -H "content-type: application/json" -d "{\"status\":\"packed\"}"
+
+Перевірка `Last-Event-ID` (після щонайменше 4 змін статусу замовлення 1):
+
+    curl -sN --max-time 2 -H "Last-Event-ID: 3" http://localhost:3000/orders/1/events
+
+### Headless-демо ізоляції кімнат
+
+    node scripts/realtime-demo.mjs               # основний: різні кімнати, B не чує
+    node scripts/realtime-demo.mjs --same-room    # контрольний: спільна кімната, B чує
+
+### Trade-offs: WebSocket vs SSE
+
+| Критерій | WebSocket | SSE |
+|---|---|---|
+| Напрям каналу | двосторонній (full-duplex): клієнт і сервер шлють дані в обидва боки по одному з'єднанню | лише сервер → клієнт; відповідь клієнта (якщо потрібна) йде окремим звичайним HTTP-запитом |
+| Реконект і відновлення | не з коробки: сирий `ws` вимагає ручної логіки; `socket.io`, який ми використали, додає реконект і `ack` сам | вбудовано в браузерний `EventSource`; `Last-Event-ID` дозволяє догнати саме пропущені події з буфера, без дублів |
+| Вимоги до інфраструктури | `Upgrade`-рукостискання (HTTP 101), не всі проксі/баланс. однаково дружні до цього; на 2+ інстансах потрібні sticky sessions | звичайний довгий HTTP-запит (`text/event-stream`), працює через будь-який HTTP-проксі без особливих налаштувань |
+| Ціна на подію | мінімальна після рукостискання — бінарний фрейм від 2 байтів заголовка | текстовий формат (`id:`/`event:`/`data:`) важчий за WS-фрейм, але значно дешевший за окремий HTTP-запит при поллінгу |
+
+Для нотифікацій про статус замовлення в проді я лишив би SSE: канал і так односторонній (клієнту не потрібно щось відповідати серверу по тому самому каналу), а SSE дає реконект і відновлення пропущеного через `Last-Event-ID` безкоштовно, без окремої бібліотеки. WebSocket виправданий там, де дійсно потрібен двосторонній канал в реальному часі — чат, спільні курсори, гра; тут це була б зайва складність заради можливості, якою ніхто не скористається.
+
+При 2+ інстансах застосунку за балансувальником кімнати `socket.io` живуть окремо в пам'яті кожного інстансу — клієнт, що зайшов у кімнату `orders:1` на інстансі A, не отримає подію, якщо `emit` стався на інстансі B; лікується підключенням `@socket.io/redis-adapter`, який пересилає події між інстансами через Redis Pub/Sub.
+
+
 ## Структура
 
 | Шлях                          | Призначення                                      |
@@ -462,3 +507,8 @@ Provider verification (`test/contract/verify-provider.ts`) піднімає сп
 | `jest.config.js`               | Multi-project конфіг Jest: `integration`, `e2e`, `contract` |
 | `Dockerfile` + `.dockerignore` | Production-образ застосунку (multi-stage), без секретів у шарах |
 | `rotate.sh`                    | Ротація пароля БД без рестарту (пам'ятай синхронно оновити `pgbouncer/userlist.txt`) |
+| `src/orders/order-events.service.ts` | Спільна шина подій (RxJS `Subject`) + буфер останніх подій для `Last-Event-ID` — одна на WS і SSE |
+| `src/orders/orders.gateway.ts` | WebSocket-gateway: `join` з перевіркою власника замовлення, кімнати `orders:<id>`, ретрансляція подій із шини |
+| `src/orders/order-status.ts`   | Список допустимих статусів замовлення (`ORDER_STATUSES`) |
+| `src/orders/dto/update-order-status.dto.ts` | DTO тіла `PATCH /orders/:orderId/status` |
+| `scripts/realtime-demo.mjs`    | Headless-демо ізоляції WS-кімнат (`socket.io-client`) + контрольний режим `--same-room` |

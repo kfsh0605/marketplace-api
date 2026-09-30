@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { SwaggerModule } from '@nestjs/swagger';
+import { IoAdapter } from '@nestjs/platform-socket.io';
 import { AppModule } from './app.module';
 import { configureApp } from './configure-app';
 import { buildSwaggerConfig } from './swagger-config';
@@ -9,6 +10,8 @@ import { Env } from './config/env.schema';
 
 async function bootstrap() {
     const app = await NestFactory.create(AppModule);
+
+    app.useWebSocketAdapter(new IoAdapter(app));
 
     configureApp(app);
 
