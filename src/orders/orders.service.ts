@@ -7,12 +7,14 @@ import { Product as ProductEntity } from '../entities/product.entity';
 import { decodeCursor, encodeCursor, PaginatedResult } from '../common/pagination';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { Order } from './order';
+import { OrderEventsService } from './order-events.service';
 
 @Injectable()
 export class OrdersService {
     constructor(
         @InjectRepository(OrderEntity)
         private readonly orderRepo: Repository<OrderEntity>,
+        private readonly orderEventsService: OrderEventsService,
     ) {}
 
     async findAll(limit: number, cursor?: string): Promise<PaginatedResult<Order>> {
@@ -79,6 +81,38 @@ export class OrdersService {
 
             return this.toResponse(await manager.save(OrderEntity, order));
         });
+    }
+
+    async updateStatus(orderId: string, status: string): Promise<Order> {
+        const id = Number(orderId);
+        if (Number.isNaN(id)) {
+            throw new NotFoundException(`Order ${orderId} not found`);
+        }
+
+        const result = await this.orderRepo
+            .createQueryBuilder()
+            .update(OrderEntity)
+            .set({ status })
+            .where('id = :id', { id })
+            .execute();
+
+        if (result.affected === 0) {
+            throw new NotFoundException(`Order ${orderId} not found`);
+        }
+
+        // Emit йде звідси, з бізнес-логіки зміни статусу, а не з контролера напряму —
+        // саме тут відбувається "факт" зміни, і саме тут ми на 100% знаємо, що UPDATE реально застосувався.
+        this.orderEventsService.emitStatusChanged(id, status);
+
+        return this.findOne(orderId);
+    }
+
+    async isOrderOwnedByUser(orderId: number, userId: number): Promise<boolean> {
+        const rows: unknown[] = await this.orderRepo.query(
+            `SELECT 1 FROM orders WHERE id = $1 AND "userId" = $2`,
+            [orderId, userId],
+        );
+        return rows.length > 0;
     }
 
     private toResponse(entity: OrderEntity): Order {
