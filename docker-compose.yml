@@ -30,6 +30,26 @@ services:
       - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
     ports:
       - "6432:6432"
+    tmpfs:
+      - /tmp
+
+  rabbitmq:
+    image: rabbitmq:4.2-management
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-marketplace}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-n4mPz9VuTxQaRy7bGhDsLk2E}
+    ports:
+      - "5672:5672"     # AMQP: сюди ходять наші publish/consume
+      - "15672:15672"   # веб-панель управління (для людей, не для коду)
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: [ "CMD", "rabbitmq-diagnostics", "-q", "check_running" ]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
 
   pact-broker-db:
     image: postgres:16-alpine
@@ -66,6 +86,7 @@ services:
 volumes:
   pgdata:
   pact_broker_db_data:
+  rabbitmq_data:
 
 secrets:
   db_password:

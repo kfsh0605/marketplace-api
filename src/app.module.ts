@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { MessagingModule } from './messaging/messaging.module';
 import { ConfigModule } from '@nestjs/config';
 import { ProductsModule } from './products/products.module';
 import { OrdersModule } from './orders/orders.module';
@@ -16,6 +17,9 @@ import { validateEnv } from './config/env.schema';
         ProductsModule,
         OrdersModule,
         HealthModule,
+        DatabaseModule,
+        MessagingModule,
+        ProductsModule,
     ],
     controllers: [],
     providers: [],
