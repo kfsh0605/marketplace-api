@@ -13,6 +13,7 @@ import { Init1788985076642 } from '../../../src/migrations/1788985076642-Init';
 import { AddProductsNameUnique1789030528991 } from '../../../src/migrations/1789030528991-AddProductsNameUnique';
 import { OrdersOrderItemsIndexes1789420020545 } from '../../../src/migrations/1789420020545-OrdersOrderItemsIndexes';
 import { CheckoutSchema1789593338925 } from '../../../src/migrations/1789593338925-CheckoutSchema';
+import { OutboxAndProcessedMessages1791300000000 } from '../../../src/migrations/1791300000000-OutboxAndProcessedMessages';
 
 export interface E2eApp {
     app: INestApplication;
@@ -34,6 +35,7 @@ export async function bootstrapE2eApp(): Promise<E2eApp> {
             AddProductsNameUnique1789030528991,
             OrdersOrderItemsIndexes1789420020545,
             CheckoutSchema1789593338925,
+            OutboxAndProcessedMessages1791300000000
         ],
         synchronize: false,
     });

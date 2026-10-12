@@ -1,7 +1,6 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { EventPublisher } from '../messaging/publisher';
-import { publishOrderPlaced } from '../messaging/publish-order-placed';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { enqueueOrderPlaced } from '../outbox/outbox';
 import { MoreThan, Repository } from 'typeorm';
 import { Order as OrderEntity } from '../entities/order.entity';
 import { OrderItem as OrderItemEntity } from '../entities/order-item.entity';
@@ -13,13 +12,10 @@ import { OrderEventsService } from './order-events.service';
 
 @Injectable()
 export class OrdersService {
-    private readonly logger = new Logger(OrdersService.name);
-
     constructor(
         @InjectRepository(OrderEntity)
         private readonly orderRepo: Repository<OrderEntity>,
         private readonly orderEventsService: OrderEventsService,
-        private readonly eventPublisher: EventPublisher,
     ) {}
 
     async findAll(limit: number, cursor?: string): Promise<PaginatedResult<Order>> {
@@ -84,20 +80,18 @@ export class OrdersService {
             order.currency = currency;
             order.items = items;
 
-            return manager.save(OrderEntity, order);
-        });
+            const saved = await manager.save(OrderEntity, order);
 
-        await publishOrderPlaced(
-            this.eventPublisher,
-            {
+            await enqueueOrderPlaced(manager, {
                 orderId: saved.id,
                 customerEmail: saved.customerEmail,
                 totalCents: saved.totalCents,
                 currency: saved.currency,
                 items: saved.items.map((i) => ({ productId: i.product.id, quantity: i.quantity })),
-            },
-            this.logger,
-        );
+            });
+
+            return saved;
+        });
 
         return this.toResponse(saved);
     }
