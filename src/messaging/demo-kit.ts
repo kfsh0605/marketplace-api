@@ -88,20 +88,6 @@ export async function countEffects(store: EffectStore): Promise<number> {
     return rows[0].n;
 }
 
-/**
- * Оцінка мережевого RTT до брокера: середній час простого запиту "туди-назад" (checkQueue).
- * Це оцінка з запасом: запит ще й заходить у процес черги, тож реальний RTT не більший.
- */
-export async function measureRttMs(ch: Channel, queue: string, samples = 30): Promise<number> {
-    await ch.checkQueue(queue); // прогрів
-    const started = process.hrtime.bigint();
-    for (let i = 0; i < samples; i++) {
-        await ch.checkQueue(queue);
-    }
-    const totalMs = Number(process.hrtime.bigint() - started) / 1e6;
-    return totalMs / samples;
-}
-
 export async function waitFor(
     cond: () => boolean | Promise<boolean>,
     timeoutMs: number,

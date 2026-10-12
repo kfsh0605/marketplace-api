@@ -1,7 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventPublisher } from '../messaging/publisher';
-import { buildOrderPlacedEvent } from '../messaging/events';
-import { withTimeout } from '../lib/with-timeout';
+import { publishOrderPlaced } from '../messaging/publish-order-placed';
 import { InjectRepository } from '@nestjs/typeorm';
 import { MoreThan, Repository } from 'typeorm';
 import { Order as OrderEntity } from '../entities/order.entity';
@@ -11,8 +10,6 @@ import { decodeCursor, encodeCursor, PaginatedResult } from '../common/paginatio
 import { CreateOrderDto } from './dto/create-order.dto';
 import { Order } from './order';
 import { OrderEventsService } from './order-events.service';
-
-const PUBLISH_TIMEOUT_MS = 3000;
 
 @Injectable()
 export class OrdersService {
@@ -90,28 +87,19 @@ export class OrdersService {
             return manager.save(OrderEntity, order);
         });
 
-        await this.publishOrderPlaced(saved);
+        await publishOrderPlaced(
+            this.eventPublisher,
+            {
+                orderId: saved.id,
+                customerEmail: saved.customerEmail,
+                totalCents: saved.totalCents,
+                currency: saved.currency,
+                items: saved.items.map((i) => ({ productId: i.product.id, quantity: i.quantity })),
+            },
+            this.logger,
+        );
 
         return this.toResponse(saved);
-    }
-
-    private async publishOrderPlaced(order: OrderEntity): Promise<void> {
-        if (!this.eventPublisher.isEnabled()) {
-            return;
-        }
-        const event = buildOrderPlacedEvent({
-            orderId: order.id,
-            customerEmail: order.customerEmail,
-            totalCents: order.totalCents,
-            currency: order.currency,
-            items: order.items.map((i) => ({ productId: i.product.id, quantity: i.quantity })),
-        });
-        try {
-            await withTimeout(this.eventPublisher.publish(event), PUBLISH_TIMEOUT_MS, 'publish order.placed');
-            this.logger.log(`Подію ${event.eventId} опубліковано (confirm отримано)`);
-        } catch (err) {
-            this.logger.error(`Подію ${event.eventId} НЕ опубліковано: ${(err as Error).message}`);
-        }
     }
 
     async updateStatus(orderId: string, status: string): Promise<Order> {

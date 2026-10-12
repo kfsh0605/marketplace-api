@@ -3,7 +3,6 @@ import {
     countEffects,
     demoEvent,
     expectEq,
-    measureRttMs,
     printResult,
     queueDepth,
     runDemo,
@@ -15,6 +14,8 @@ import { QUEUE_ORDER_PLACED, QUEUE_ORDER_PLACED_DLQ } from './messaging/rabbitmq
 const COUNT = 5;
 /** Дефолтний consumer_timeout RabbitMQ: 30 хвилин */
 const CONSUMER_TIMEOUT_MS = 30 * 60 * 1000;
+/** quorum-черга сама обрізає prefetch до 2000 (щоб Raft-лог не розпухав) */
+const QUORUM_PREFETCH_CAP = 2000;
 
 void runDemo(async (demo, failures) => {
     const publisher = new EventPublisher();
@@ -47,7 +48,6 @@ void runDemo(async (demo, failures) => {
         });
         await waitFor(() => settled >= COUNT, 15_000);
         await demo.ch.cancel(consumerTag);
-        const rtt = await measureRttMs(demo.ch, QUEUE_ORDER_PLACED);
 
         // 3. Доказ, що ack справді дійшли до брокера: закриваємо канал.
         // Непідтверджені повідомлення повернулись би в чергу, тож новий канал має побачити 0.
@@ -59,18 +59,24 @@ void runDemo(async (demo, failures) => {
 
         const effect = await countEffects(demo.store);
 
-        // 4. Цифри для обґрунтування prefetch (потрапляють у README)
+        // 4. Цифри для обґрунтування prefetch (потрапляють у README).
+        // Опора тут consumer_timeout, а не RTT: це фіксований параметр брокера, а RTT залежить від
+        // машини (0.05 мс на одній, 0.7 мс на іншій), тож оцінка "час / RTT" розходиться в рази
+        // і не відтворюється між середовищами.
         const avg = durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : 0;
         const max = durations.length ? Math.max(...durations) : 0;
+        const worst = Math.max(max, 1);
+        const byTimeout = Math.floor(CONSUMER_TIMEOUT_MS / worst);
+        const ceiling = Math.min(byTimeout, QUORUM_PREFETCH_CAP);
+        const windowMs = prefetch * worst;
         console.log(`Обробка одного повідомлення: у середньому ${avg} мс, максимум ${max} мс.`);
         console.log(
-            `Перевірка безпеки prefetch: ${prefetch} повідомлень × ${max} мс → ${prefetch * max} мс, ` +
-            `а ліміт consumer_timeout ${CONSUMER_TIMEOUT_MS} мс.`,
+            `Стеля prefetch за consumer_timeout: ${CONSUMER_TIMEOUT_MS} мс / ${worst} мс (найгірший час) = ${byTimeout}; ` +
+            `quorum-черга обрізає prefetch до ${QUORUM_PREFETCH_CAP}; підсумкова стеля ${ceiling}.`,
         );
-        const estimate = Math.max(1, Math.floor(avg / rtt));
-        console.log(`RTT до брокера (простий запит туди-назад): у середньому ${rtt.toFixed(2)} мс.`);
         console.log(
-            `Оцінка prefetch за формулою час обробки / RTT: ${avg} мс / ${rtt.toFixed(2)} мс → ${estimate}; у проєкті prefetch ${prefetch}.`,
+            `Найгірший час розібрати все вікно: ${prefetch} × ${worst} мс = ${windowMs} мс, ` +
+            `це ${((windowMs / CONSUMER_TIMEOUT_MS) * 100).toFixed(3)}% від consumer_timeout; prefetch ${prefetch} ≤ стеля ${ceiling}.`,
         );
 
         // 5. Протокол і самоперевірка
@@ -82,11 +88,10 @@ void runDemo(async (demo, failures) => {
         expectEq(failures, 'acked', acked, COUNT);
         expectEq(failures, 'dlq', dlq, 0);
         expectEq(failures, 'залишок у черзі після закриття каналу', leftover, 0);
-        if (prefetch < 1 || prefetch > 2000) {
-            failures.push(`prefetch поза діапазоном 1..2000: ${prefetch}`);
-        }
-        if (prefetch * max >= CONSUMER_TIMEOUT_MS) {
-            failures.push('prefetch × час обробки не вкладається в consumer_timeout');
+        if (prefetch < 1 || prefetch > ceiling) {
+            failures.push(
+                `prefetch ${prefetch} поза діапазоном 1..${ceiling} (стеля: consumer_timeout / найгірший час обробки і межа quorum-черги)`,
+            );
         }
     } finally {
         await publisher.close().catch(() => undefined);

@@ -31,9 +31,11 @@ async function main() {
     console.log(`Стартовий stock товару "${PRODUCT_NAME}": ${product.stock}`);
     console.log(`Стріляємо ${ATTEMPTS} паралельними checkout()...`);
 
+    // publisher: null — demo:race міряє гонку за stock, брокер йому не потрібен, а 10 успішних
+    // checkout не повинні щоразу засмічувати робочу чергу order.placed
     const results = await Promise.all(
         Array.from({ length: ATTEMPTS }, () =>
-            checkout(buyer.id, product.id, 1)
+            checkout(buyer.id, product.id, 1, { publisher: null })
                 .then(() => ({ ok: true as const, expected: false, error: null as unknown }))
                 .catch((err) => ({
                     ok: false as const,
