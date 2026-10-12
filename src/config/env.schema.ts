@@ -8,6 +8,10 @@ export const envSchema = z.object({
     DB_USER: z.string().min(1),
     DB_NAME: z.string().min(1),
     DATABASE_URL: z.string().min(1).optional(),
+    RABBITMQ_HOST: z.string().min(1).default('localhost'),
+    RABBITMQ_PORT: z.coerce.number().int().positive().default(5672),
+    RABBITMQ_USER: z.string().min(1).default('marketplace'),
+    RABBITMQ_URL: z.string().min(1).optional(),
 });
 export type Env = z.infer<typeof envSchema>;
 
