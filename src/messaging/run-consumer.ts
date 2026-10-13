@@ -1,19 +1,19 @@
-import 'reflect-metadata';
 import { connect } from 'amqplib';
-import { AppDataSource } from '../data-source';
+import { createPool } from '../outbox/pool';
 import { startOrderPlacedConsumer } from './consumer';
+import { pgStore } from './pg-store';
 import { getRabbitUrl, QUEUE_ORDER_PLACED } from './rabbitmq.config';
 import { assertTopology } from './topology';
 
 async function main(): Promise<void> {
-    await AppDataSource.initialize();
+    const pool = createPool();
 
     const conn = await connect(getRabbitUrl());
     const ch = await conn.createChannel();
 
     await assertTopology(ch);
 
-    const { prefetch } = await startOrderPlacedConsumer(ch, AppDataSource, {
+    const { prefetch } = await startOrderPlacedConsumer(ch, pgStore(pool), {
         onDelivery: (d) =>
             console.log(
                 `[consumer] доставка ${d.eventId ?? '(нечитабельне)'} #${d.deliveryCount}${d.redelivered ? ' (повторна)' : ''}`,
@@ -31,7 +31,7 @@ async function main(): Promise<void> {
         console.log('[consumer] зупинка...');
         await ch.close().catch(() => undefined);
         await conn.close().catch(() => undefined);
-        await AppDataSource.destroy().catch(() => undefined);
+        await pool.end().catch(() => undefined);
         process.exit(0);
     };
     process.on('SIGINT', shutdown);

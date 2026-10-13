@@ -5,6 +5,7 @@ import { buildOrderPlacedEvent, type OrderPlacedEvent } from './events';
 import { QUEUE_ORDER_PLACED, QUEUE_ORDER_PLACED_DLQ, getRabbitUrl } from './rabbitmq.config';
 import { assertTopology } from './topology';
 import { sleep } from '../lib/sleep';
+import { pgStore } from './pg-store';
 
 /**
  * Демо-події мають orderId >= цієї межі: так їх легко відрізнити від справжніх
@@ -34,9 +35,7 @@ export async function openDemo(): Promise<Demo> {
     const ch = await conn.createChannel();
     await assertTopology(ch);
 
-    const store: EffectStore = {
-        query: async (sql, params) => (await pool.query(sql, params as any[])).rows,
-    };
+    const store: EffectStore = pgStore(pool);
 
     return {
         conn,
@@ -63,6 +62,8 @@ export async function resetDemoState(demo: Demo): Promise<void> {
     await demo.ch.purgeQueue(QUEUE_ORDER_PLACED);
     await demo.ch.purgeQueue(QUEUE_ORDER_PLACED_DLQ);
     await demo.store.query(`DELETE FROM processed_order_events WHERE "orderId" >= $1`, [DEMO_ORDER_ID_BASE]);
+    // Журнал принятых тоже чистим: иначе при повторном прогоне демо-событие считалось бы дублем и пропускалось
+    await demo.store.query(`DELETE FROM processed_messages WHERE message_id ~ '^order-placed:9[0-9]{5}$'`);
 }
 
 export function demoEvent(n: number): OrderPlacedEvent {
