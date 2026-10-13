@@ -21,6 +21,7 @@
     "demo:retry": "bash scripts/with-secrets.sh dev node dist/demo-retry.js",
     "rabbit:setup": "bash scripts/with-secrets.sh dev node dist/messaging/setup.js",
     "consumer": "bash scripts/with-secrets.sh dev node dist/messaging/run-consumer.js",
+    "relay": "bash scripts/with-secrets.sh dev node dist/outbox/run-relay.js",
     "demo:publish": "bash scripts/with-secrets.sh dev node dist/demo-rabbit-publish.js",
     "demo:dlq": "bash scripts/with-secrets.sh dev node dist/demo-rabbit-dlq.js",
     "demo:duplicate": "bash scripts/with-secrets.sh dev node dist/demo-rabbit-duplicate.js",
