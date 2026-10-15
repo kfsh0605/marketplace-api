@@ -42,8 +42,10 @@ export function resolveRabbitUrl(): string | null {
     if (process.env.RABBITMQ_DISABLED === '1') {
         return null;
     }
-    if (process.env.RABBITMQ_URL) {
-        return process.env.RABBITMQ_URL;
+    // BROKER_URL: имя из условия ДЗ №22; RABBITMQ_URL: имя, принятое в этом проекте
+    const explicitUrl = process.env.RABBITMQ_URL ?? process.env.BROKER_URL;
+    if (explicitUrl) {
+        return explicitUrl;
     }
     const passwordFile = join(process.cwd(), 'secrets', 'rabbitmq_password');
     if (!existsSync(passwordFile)) {

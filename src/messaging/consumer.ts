@@ -2,9 +2,17 @@ import type { Channel, ConsumeMessage } from 'amqplib';
 import type { OrderPlacedEvent } from './events';
 import { PREFETCH, QUEUE_ORDER_PLACED, ROUTING_KEY_ORDER_PLACED } from './rabbitmq.config';
 
-export interface EffectStore {
+export interface Queryable {
     query(sql: string, params?: unknown[]): Promise<any>;
 }
+
+export interface EffectStore extends Queryable {
+    /** Выполняет fn в ОДНОЙ транзакции на одном соединении: BEGIN, затем COMMIT; при исключении ROLLBACK */
+    transaction<T>(fn: (tx: Queryable) => Promise<T>): Promise<T>;
+}
+
+/** Имя этого консьюмера в таблице processed_messages: один и тот же конверт могут принять разные консьюмеры */
+export const CONSUMER_ORDER_PLACED = 'orders.order-placed';
 
 export interface DeliveryInfo {
     eventId: string | null;
@@ -21,14 +29,33 @@ export interface ConsumerOptions {
     onSettled?: (result: { eventId: string | null; outcome: SettledOutcome; durationMs: number }) => void;
 }
 
+/**
+ * Применяет эффект order.placed ровно один раз, сколько бы раз ни пришёл конверт.
+ * Возвращает true, если эффект применён сейчас, false если это дубль.
+ */
 export async function applyOrderPlacedEffect(store: EffectStore, event: OrderPlacedEvent): Promise<boolean> {
-    const rows = await store.query(
-        `INSERT INTO processed_order_events ("eventId", "orderId") VALUES ($1, $2)
-         ON CONFLICT ("eventId") DO NOTHING
-         RETURNING "eventId"`,
-        [event.eventId, event.data.orderId],
-    );
-    return Array.isArray(rows) && rows.length > 0;
+    return store.transaction(async (tx) => {
+        // Уровень 2 (inbox): записываем номер конверта в журнал принятых.
+        // Если такой номер от этого консьюмера уже есть, вставки не будет, RETURNING вернёт 0 строк.
+        const mark = await tx.query(
+            `INSERT INTO processed_messages (message_id, consumer) VALUES ($1, $2)
+             ON CONFLICT (message_id, consumer) DO NOTHING
+             RETURNING message_id`,
+            [event.eventId, CONSUMER_ORDER_PLACED],
+        );
+        if (!Array.isArray(mark) || mark.length === 0) {
+            return false; // дубль: эффект не трогаем, транзакция закоммитит пустоту
+        }
+
+        // Уровень 1 (природный ключ): повтор записи эффекта ничего не меняет.
+        // Эффект здесь та же запись о заказе, что и в ДЗ19 (заглушка под письмо или резерв).
+        await tx.query(
+            `INSERT INTO processed_order_events ("eventId", "orderId") VALUES ($1, $2)
+             ON CONFLICT ("eventId") DO NOTHING`,
+            [event.eventId, event.data.orderId],
+        );
+        return true;
+    });
 }
 
 function parseOrderPlaced(msg: ConsumeMessage): OrderPlacedEvent | null {
