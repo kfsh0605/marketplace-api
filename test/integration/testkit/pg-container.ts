@@ -10,6 +10,7 @@ import { AddProductsNameUnique1789030528991 } from '../../../src/migrations/1789
 import { OrdersOrderItemsIndexes1789420020545 } from '../../../src/migrations/1789420020545-OrdersOrderItemsIndexes';
 import { CheckoutSchema1789593338925 } from '../../../src/migrations/1789593338925-CheckoutSchema';
 import { OutboxAndProcessedMessages1791300000000 } from '../../../src/migrations/1791300000000-OutboxAndProcessedMessages';
+import { IdempotencyKeys1791400000000 } from '../../../src/migrations/1791400000000-IdempotencyKeys';
 
 export interface PgHandle {
     container: StartedPostgreSqlContainer;
@@ -32,7 +33,8 @@ export async function startPg(label = ''): Promise<PgHandle> {
             AddProductsNameUnique1789030528991,
             OrdersOrderItemsIndexes1789420020545,
             CheckoutSchema1789593338925,
-            OutboxAndProcessedMessages1791300000000
+            OutboxAndProcessedMessages1791300000000,
+            IdempotencyKeys1791400000000
         ],
         synchronize: false,
     });

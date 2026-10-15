@@ -1,8 +1,6 @@
-import { Body, Controller, Get, Headers, HttpCode, Param, Patch, Post, Query, Req, Res, UseInterceptors } from '@nestjs/common';
-import { ApiCreatedResponse, ApiHeader, ApiOkResponse, ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { BadRequestException, Body, Controller, Get, Headers, HttpCode, Param, Patch, Post, Query, Req, Res } from '@nestjs/common';import { ApiCreatedResponse, ApiHeader, ApiOkResponse, ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { OrdersService } from './orders.service';
-import { IdempotencyInterceptor } from '../common/interceptors/idempotency.interceptor';
 import { Order } from './order';
 import { OrderListResponse } from './order-list-response';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
@@ -37,7 +35,6 @@ export class OrdersController {
 
     @Post()
     @HttpCode(201)
-    @UseInterceptors(IdempotencyInterceptor)
     @ApiOperation({ operationId: 'createOrder', summary: 'Створити нове замовлення' })
     @ApiHeader({
         name: 'Idempotency-Key',
@@ -46,8 +43,19 @@ export class OrdersController {
             'Унікальний ключ, який клієнт генерує самостійно для запобігання дублюванню замовлень при повторній відправці одного й того самого запиту (наприклад, при повторній спробі після таймауту мережі). Той самий ключ з тим самим тілом запиту поверне збережену раніше відповідь замість створення нового замовлення.',
     })
     @ApiCreatedResponse({ type: Order })
-    create(@Body() dto: CreateOrderDto) {
-        return this.ordersService.create(dto);
+    async create(
+        @Body() dto: CreateOrderDto,
+        @Headers('idempotency-key') idempotencyKey: string | undefined,
+        @Res({ passthrough: true }) res: Response,
+    ) {
+        if (typeof idempotencyKey !== 'string' || idempotencyKey.length === 0) {
+            throw new BadRequestException('Idempotency-Key header is required');
+        }
+        const { order, replayed } = await this.ordersService.createIdempotent(dto, idempotencyKey);
+        if (replayed) {
+            res.setHeader('Idempotency-Replay', 'true');
+        }
+        return order;
     }
     @Patch(':orderId/status')
     @ApiOperation({ operationId: 'updateOrderStatus', summary: 'Змінити статус замовлення' })
