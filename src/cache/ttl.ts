@@ -8,3 +8,6 @@ export function jitteredTtl(
 ): number {
     return baseSec + Math.floor(Math.random() * (spreadSec + 1));
 }
+export const LOCK_TTL_MS = 5000;
+export const LOCK_WAIT_BUDGET_MS = 2000;
+export const LOCK_POLL_MS = 25;

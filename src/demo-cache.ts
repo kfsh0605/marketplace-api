@@ -2,10 +2,11 @@ import 'reflect-metadata';
 import type { Redis } from 'ioredis';
 import { DataSource, DataSourceOptions } from 'typeorm';
 import { RedisCache } from './cache/redis-cache';
+import { RedisLock } from './cache/redis-lock';
 import { AppDataSource } from './data-source';
 import { expectAtLeast, expectEq, printLines, runStandalone } from './lib/demo-output';
 import { QueryCounter } from './lib/query-counter';
-import { CARD_QUERY_TAG, cardKey } from './products/product-card';
+import { CARD_QUERY_TAG, cardKey, cardLockKey } from './products/product-card';
 import { ProductCardRepository } from './products/product-card.repository';
 import { ProductCardService } from './products/product-card.service';
 import { createCacheClient } from './redis/connect';
@@ -13,10 +14,24 @@ import { createCacheClient } from './redis/connect';
 const DEMO_PRODUCTS = 60;
 const DEMO_PREFIX = 'cache-demo-';
 const WARM_READS = 100;
+const CONCURRENT = 50;
+const DEMO_LOCK_NAME = 'lock:cache-demo:foreign';
 
 async function readConfig(redis: Redis, name: string): Promise<string> {
     const reply = (await redis.call('CONFIG', 'GET', name)) as string[];
     return reply[1];
+}
+
+async function stampede(
+    service: ProductCardService,
+    counter: QueryCounter,
+    redis: Redis,
+    productId: number,
+): Promise<number> {
+    await redis.del(cardKey(productId), cardLockKey(productId));
+    counter.reset();
+    await Promise.all(Array.from({ length: CONCURRENT }, () => service.getCard(productId)));
+    return counter.count(CARD_QUERY_TAG);
 }
 
 void runStandalone(async (failures) => {
@@ -28,7 +43,7 @@ void runStandalone(async (failures) => {
     } as DataSourceOptions);
     await dataSource.initialize();
     const redis = await createCacheClient();
-    let keys: string[] = [];
+    let cleanupKeys: string[] = [DEMO_LOCK_NAME];
 
     try {
         const policy = await readConfig(redis, 'maxmemory-policy');
@@ -44,13 +59,15 @@ void runStandalone(async (failures) => {
             `${DEMO_PREFIX}%`,
         ]);
         const ids: number[] = rows.map((r: { id: number }) => r.id);
-        keys = ids.map(cardKey);
-        await redis.del(...keys);
+        const keys = ids.map(cardKey);
+        cleanupKeys = [...keys, ...ids.map(cardLockKey), DEMO_LOCK_NAME];
+        await redis.del(...cleanupKeys);
 
-        const service = new ProductCardService(
-            new ProductCardRepository(dataSource),
-            new RedisCache(redis),
-        );
+        const repo = new ProductCardRepository(dataSource);
+        const cache = new RedisCache(redis);
+        const lock = new RedisLock(redis);
+        const service = new ProductCardService(repo, cache, lock);
+        const unprotected = new ProductCardService(repo, cache, lock, { singleFlight: false });
 
         for (const id of ids) {
             await service.getCard(id);
@@ -65,6 +82,15 @@ void runStandalone(async (failures) => {
         }
         const dbCallsWarm = counter.count(CARD_QUERY_TAG);
 
+        const target = ids[0];
+        const dbCallsNoLock = await stampede(unprotected, counter, redis, target);
+        const dbCalls = await stampede(service, counter, redis, target);
+
+        const ownerToken = await lock.acquire(DEMO_LOCK_NAME, 5000);
+        const foreignRelease = await lock.release(DEMO_LOCK_NAME, 'chuzhyi-token');
+        const survived = await redis.exists(DEMO_LOCK_NAME);
+        const ownRelease = ownerToken ? await lock.release(DEMO_LOCK_NAME, ownerToken) : false;
+
         printLines({
             'cache-lru': policy !== 'noeviction' ? 1 : 0,
             'cache-maxmemory': maxmemory > 0 ? 1 : 0,
@@ -73,6 +99,12 @@ void runStandalone(async (failures) => {
             'ttl-min': Math.min(...ttls),
             'ttl-max': Math.max(...ttls),
             'db-calls-warm': dbCallsWarm,
+            concurrent: CONCURRENT,
+            'db-calls': dbCalls,
+            'db-calls-nolock': dbCallsNoLock,
+            'lock-foreign-release': foreignRelease ? 1 : 0,
+            'lock-survived-foreign-release': survived,
+            'lock-own-release': ownRelease ? 1 : 0,
         });
 
         expectEq(failures, 'cache-lru', policy !== 'noeviction', true);
@@ -80,10 +112,15 @@ void runStandalone(async (failures) => {
         expectAtLeast(failures, 'warmed', warmed, 50);
         expectAtLeast(failures, 'ttl-distinct', ttlDistinct, 5);
         expectEq(failures, 'db-calls-warm', dbCallsWarm, 0);
+        expectAtLeast(failures, 'concurrent', CONCURRENT, 20);
+        expectEq(failures, 'db-calls', dbCalls, 1);
+        expectAtLeast(failures, 'db-calls-nolock', dbCallsNoLock, 2);
+        expectEq(failures, 'lock acquired', ownerToken !== null, true);
+        expectEq(failures, 'lock-foreign-release', foreignRelease, false);
+        expectEq(failures, 'lock-survived-foreign-release', survived, 1);
+        expectEq(failures, 'lock-own-release', ownRelease, true);
     } finally {
-        if (keys.length > 0) {
-            await redis.del(...keys).catch(() => undefined);
-        }
+        await redis.del(...cleanupKeys).catch(() => undefined);
         await dataSource.query(`DELETE FROM products WHERE name LIKE $1`, [`${DEMO_PREFIX}%`]).catch(() => undefined);
         await redis.quit().catch(() => undefined);
         await dataSource.destroy().catch(() => undefined);

@@ -12,3 +12,4 @@ export interface ProductCard {
 export const CARD_QUERY_TAG = 'product-card';
 
 export const cardKey = (productId: number): string => `product:card:${productId}`;
+export const cardLockKey = (productId: number): string => `lock:product:card:${productId}`;
