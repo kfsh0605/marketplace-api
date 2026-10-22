@@ -9,7 +9,7 @@ export function requireUrl(name: string): string {
     return url;
 }
 
-export async function createCacheClient(url: string = requireUrl('REDIS_URL')): Promise<Redis> {
+async function connectClient(url: string, label: string): Promise<Redis> {
     const client = new Redis(url, {
         lazyConnect: true,
         connectTimeout: 2000,
@@ -18,7 +18,15 @@ export async function createCacheClient(url: string = requireUrl('REDIS_URL')): 
         enableOfflineQueue: false,
         retryStrategy: (times) => Math.min(times * 200, 2000),
     });
-    client.on('error', (err) => console.warn(`redis cache: ${err.message}`));
-    await withTimeout(client.connect(), 5000, 'підключення до Redis-кешу');
+    client.on('error', (err) => console.warn(`${label}: ${err.message}`));
+    await withTimeout(client.connect(), 5000, `підключення до ${label}`);
     return client;
+}
+
+export function createCacheClient(url: string = requireUrl('REDIS_URL')): Promise<Redis> {
+    return connectClient(url, 'Redis-кеш');
+}
+
+export function createSessionClient(url: string = requireUrl('REDIS_QUEUE_URL')): Promise<Redis> {
+    return connectClient(url, 'Redis-сесії');
 }
