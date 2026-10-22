@@ -30,3 +30,18 @@ export function createCacheClient(url: string = requireUrl('REDIS_URL')): Promis
 export function createSessionClient(url: string = requireUrl('REDIS_QUEUE_URL')): Promise<Redis> {
     return connectClient(url, 'Redis-сесії');
 }
+
+export type QueueRole = 'producer' | 'worker';
+
+export function queueConnectionOptions(role: QueueRole, url: string = requireUrl('REDIS_QUEUE_URL')) {
+    const parsed = new URL(url);
+    return {
+        host: parsed.hostname,
+        port: Number(parsed.port || 6379),
+        username: parsed.username ? decodeURIComponent(parsed.username) : undefined,
+        password: parsed.password ? decodeURIComponent(parsed.password) : undefined,
+        maxRetriesPerRequest: role === 'worker' ? null : 1,
+    };
+}
+
+export const createQueueInstanceClient = createSessionClient;

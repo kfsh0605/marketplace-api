@@ -25,6 +25,7 @@
     "demo:cache": "bash scripts/with-secrets.sh dev node dist/demo-cache.js",
     "demo:session": "bash scripts/with-secrets.sh dev node dist/demo-session.js",
     "demo:ratelimit": "bash scripts/with-secrets.sh dev node dist/demo-ratelimit.js",
+    "demo:queue": "bash scripts/with-secrets.sh dev node dist/demo-queue.js",
     "rabbit:setup": "bash scripts/with-secrets.sh dev node dist/messaging/setup.js",
     "consumer": "bash scripts/with-secrets.sh dev node dist/messaging/run-consumer.js",
     "relay": "bash scripts/with-secrets.sh dev node dist/outbox/run-relay.js",

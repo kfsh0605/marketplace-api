@@ -1,3 +1,5 @@
+import { sleep } from './sleep';
+
 export function printLines(pairs: Record<string, string | number>): void {
     for (const [key, value] of Object.entries(pairs)) {
         console.log(`${key}=${value}`);
@@ -32,4 +34,19 @@ export async function runStandalone(body: (failures: string[]) => Promise<void>)
     }
     console.log('OK: усі інваріанти виконано');
     process.exit(0);
+}
+
+export async function waitUntil(
+    condition: () => boolean | Promise<boolean>,
+    timeoutMs: number,
+    stepMs = 50,
+): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        if (await condition()) {
+            return true;
+        }
+        await sleep(stepMs);
+    }
+    return condition();
 }
