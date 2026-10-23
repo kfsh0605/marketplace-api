@@ -1,5 +1,6 @@
-import { BadRequestException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Optional, UnprocessableEntityException } from '@nestjs/common';
 import { createHash } from 'crypto';
+import { ProductCardService } from '../products/product-card.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { enqueueOrderPlaced } from '../outbox/outbox';
 import { EntityManager, MoreThan, Repository } from 'typeorm';
@@ -17,6 +18,7 @@ export class OrdersService {
         @InjectRepository(OrderEntity)
         private readonly orderRepo: Repository<OrderEntity>,
         private readonly orderEventsService: OrderEventsService,
+        @Optional() private readonly productCards?: ProductCardService,
     ) {}
 
     async findAll(limit: number, cursor?: string): Promise<PaginatedResult<Order>> {
@@ -49,9 +51,9 @@ export class OrdersService {
         return this.toResponse(entity);
     }
 
-    /** Путь без ключа идемпотентности (внутренние вызовы и тесты). */
     async create(dto: CreateOrderDto): Promise<Order> {
         const saved = await this.orderRepo.manager.transaction((manager) => this.insertOrderWithEvent(manager, dto));
+        await this.invalidateCards(saved);
         return this.toResponse(saved);
     }
 
@@ -95,6 +97,7 @@ export class OrdersService {
         });
 
         if (outcome.kind === 'created') {
+            await this.invalidateCards(outcome.saved);
             return { order: this.toResponse(outcome.saved), replayed: false };
         }
         if (outcome.existing.request_hash !== requestHash) {
@@ -146,6 +149,13 @@ export class OrdersService {
         });
 
         return saved;
+    }
+    private async invalidateCards(order: OrderEntity): Promise<void> {
+        if (!this.productCards) {
+            return;
+        }
+        const productIds = new Set(order.items.map((item) => item.product.id));
+        await Promise.all([...productIds].map((id) => this.productCards.invalidate(id)));
     }
 
     async updateStatus(orderId: string, status: string): Promise<Order> {

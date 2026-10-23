@@ -22,8 +22,13 @@
     "demo:outbox": "bash scripts/with-secrets.sh dev node dist/demo-outbox.js",
     "demo:crash-write": "bash scripts/with-secrets.sh dev node dist/demo-crash-write.js",
     "demo:crash-relay": "bash scripts/with-secrets.sh dev node dist/demo-crash-relay.js",
+    "demo:cache": "bash scripts/with-secrets.sh dev node dist/demo-cache.js",
+    "demo:session": "bash scripts/with-secrets.sh dev node dist/demo-session.js",
+    "demo:ratelimit": "bash scripts/with-secrets.sh dev node dist/demo-ratelimit.js",
+    "demo:queue": "bash scripts/with-secrets.sh dev node dist/demo-queue.js",
     "rabbit:setup": "bash scripts/with-secrets.sh dev node dist/messaging/setup.js",
     "consumer": "bash scripts/with-secrets.sh dev node dist/messaging/run-consumer.js",
+    "queue:worker": "bash scripts/with-secrets.sh dev node dist/queue/run-worker.js",
     "relay": "bash scripts/with-secrets.sh dev node dist/outbox/run-relay.js",
     "demo:publish": "bash scripts/with-secrets.sh dev node dist/demo-rabbit-publish.js",
     "demo:dlq": "bash scripts/with-secrets.sh dev node dist/demo-rabbit-dlq.js",
@@ -44,9 +49,11 @@
     "@nestjs/typeorm": "^11.0.3",
     "@nestjs/websockets": "^11.2.7",
     "amqplib": "^2.2.0",
+    "bullmq": "^6.3.19",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "express": "^4.22.2",
+    "ioredis": "^5.11.1",
     "js-yaml": "^5.4.2",
     "pg": "^8.23.0",
     "reflect-metadata": "^0.2.2",
@@ -71,6 +78,6 @@
     "testcontainers": "^12.1.0",
     "ts-jest": "^29.4.12",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^6.0.3"
+    "typescript": "~6.0.3"
   }
 }

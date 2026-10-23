@@ -1,5 +1,6 @@
-import { BadRequestException, Body, Controller, Get, Headers, HttpCode, Param, Patch, Post, Query, Req, Res } from '@nestjs/common';import { ApiCreatedResponse, ApiHeader, ApiOkResponse, ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { BadRequestException, Body, Controller, Get, Headers, HttpCode, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';import { ApiCreatedResponse, ApiHeader, ApiOkResponse, ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { RateLimitGuard } from '../ratelimit/rate-limit.guard';
 import { OrdersService } from './orders.service';
 import { Order } from './order';
 import { OrderListResponse } from './order-list-response';
@@ -43,6 +44,7 @@ export class OrdersController {
             'Унікальний ключ, який клієнт генерує самостійно для запобігання дублюванню замовлень при повторній відправці одного й того самого запиту (наприклад, при повторній спробі після таймауту мережі). Той самий ключ з тим самим тілом запиту поверне збережену раніше відповідь замість створення нового замовлення.',
     })
     @ApiCreatedResponse({ type: Order })
+    @UseGuards(RateLimitGuard)
     async create(
         @Body() dto: CreateOrderDto,
         @Headers('idempotency-key') idempotencyKey: string | undefined,
