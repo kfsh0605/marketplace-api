@@ -9,9 +9,9 @@ export function requireUrl(name: string): string {
     return url;
 }
 
-async function connectClient(url: string, label: string): Promise<Redis> {
+function buildClient(url: string, label: string, lazyConnect: boolean): Redis {
     const client = new Redis(url, {
-        lazyConnect: true,
+        lazyConnect,
         connectTimeout: 2000,
         commandTimeout: 500,
         maxRetriesPerRequest: 1,
@@ -19,6 +19,11 @@ async function connectClient(url: string, label: string): Promise<Redis> {
         retryStrategy: (times) => Math.min(times * 200, 2000),
     });
     client.on('error', (err) => console.warn(`${label}: ${err.message}`));
+    return client;
+}
+
+async function connectClient(url: string, label: string): Promise<Redis> {
+    const client = buildClient(url, label, true);
     await withTimeout(client.connect(), 5000, `підключення до ${label}`);
     return client;
 }
@@ -29,6 +34,10 @@ export function createCacheClient(url: string = requireUrl('REDIS_URL')): Promis
 
 export function createSessionClient(url: string = requireUrl('REDIS_QUEUE_URL')): Promise<Redis> {
     return connectClient(url, 'Redis-сесії');
+}
+
+export function openCacheClient(url: string = requireUrl('REDIS_URL')): Redis {
+    return buildClient(url, 'Redis-кеш', false);
 }
 
 export type QueueRole = 'producer' | 'worker';

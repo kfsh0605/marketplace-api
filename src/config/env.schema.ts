@@ -12,6 +12,10 @@ export const envSchema = z.object({
     RABBITMQ_PORT: z.coerce.number().int().positive().default(5672),
     RABBITMQ_USER: z.string().min(1).default('marketplace'),
     RABBITMQ_URL: z.string().min(1).optional(),
+    REDIS_URL: z.string().min(1).optional(),
+    REDIS_QUEUE_URL: z.string().min(1).optional(),
+    REDIS_DISABLED: z.string().optional(),
+    TRUST_PROXY_HOPS: z.coerce.number().int().min(0).default(0),
 });
 export type Env = z.infer<typeof envSchema>;
 

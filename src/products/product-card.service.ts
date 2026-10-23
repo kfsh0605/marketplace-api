@@ -20,14 +20,17 @@ export class ProductCardService {
 
     constructor(
         private readonly repo: ProductCardRepository,
-        private readonly cache: RedisCache,
-        private readonly lock: RedisLock,
+        private readonly cache: RedisCache | null,
+        private readonly lock: RedisLock | null,
         options: ProductCardOptions = {},
     ) {
         this.singleFlight = options.singleFlight ?? true;
     }
 
     async getCard(productId: number): Promise<ProductCard | null> {
+        if (!this.cache || !this.lock) {
+            return this.repo.loadCard(productId);
+        }
         const lookup = await this.cache.get<ProductCard | null>(cardKey(productId));
         if (lookup.hit) {
             return lookup.value;
@@ -36,6 +39,9 @@ export class ProductCardService {
     }
 
     async invalidate(productId: number): Promise<void> {
+        if (!this.cache) {
+            return;
+        }
         await this.cache.del(cardKey(productId));
     }
 
