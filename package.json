@@ -28,6 +28,7 @@
     "demo:queue": "bash scripts/with-secrets.sh dev node dist/demo-queue.js",
     "rabbit:setup": "bash scripts/with-secrets.sh dev node dist/messaging/setup.js",
     "consumer": "bash scripts/with-secrets.sh dev node dist/messaging/run-consumer.js",
+    "queue:worker": "bash scripts/with-secrets.sh dev node dist/queue/run-worker.js",
     "relay": "bash scripts/with-secrets.sh dev node dist/outbox/run-relay.js",
     "demo:publish": "bash scripts/with-secrets.sh dev node dist/demo-rabbit-publish.js",
     "demo:dlq": "bash scripts/with-secrets.sh dev node dist/demo-rabbit-dlq.js",
