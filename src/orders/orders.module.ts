@@ -6,9 +6,10 @@ import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 import { OrderEventsService } from './order-events.service';
 import { OrdersGateway } from './orders.gateway';
+import { ProductsModule } from '../products/products.module';
 
 @Module({
-    imports: [TypeOrmModule.forFeature([Order, OrderItem])],
+    imports: [TypeOrmModule.forFeature([Order, OrderItem]), ProductsModule],
     controllers: [OrdersController],
     providers: [OrdersService, OrderEventsService, OrdersGateway],
 })

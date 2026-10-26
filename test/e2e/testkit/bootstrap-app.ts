@@ -49,6 +49,7 @@ export async function bootstrapE2eApp(): Promise<E2eApp> {
     process.env.DB_USER = 'e2e-placeholder';
     process.env.DB_NAME = 'e2e-placeholder';
     process.env.RABBITMQ_DISABLED = '1';
+    process.env.REDIS_DISABLED = '1';
     const { AppModule } = require('../../../src/app.module') as { AppModule: typeof AppModuleType };
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -69,6 +70,7 @@ export async function bootstrapE2eApp(): Promise<E2eApp> {
             delete process.env.DB_USER;
             delete process.env.DB_NAME;
             delete process.env.RABBITMQ_DISABLED;
+            delete process.env.REDIS_DISABLED;
         },
     };
 }

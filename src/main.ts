@@ -19,6 +19,10 @@ async function bootstrap() {
     SwaggerModule.setup('docs', app, document);
 
     const configService = app.get(ConfigService<Env, true>);
+    const trustProxyHops = configService.get('TRUST_PROXY_HOPS', { infer: true });
+    if (trustProxyHops > 0) {
+        app.getHttpAdapter().getInstance().set('trust proxy', trustProxyHops);
+    }
     const port = configService.get('PORT', { infer: true });
 
     await app.listen(port);

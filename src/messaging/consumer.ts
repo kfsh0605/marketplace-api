@@ -26,6 +26,7 @@ export interface ConsumerOptions {
     prefetch?: number;
     onDelivery?: (info: DeliveryInfo) => void;
     afterEffect?: (info: DeliveryInfo, applied: boolean) => 'requeue' | void;
+    afterApplied?: (event: OrderPlacedEvent) => Promise<void>;
     onSettled?: (result: { eventId: string | null; outcome: SettledOutcome; durationMs: number }) => void;
 }
 
@@ -128,7 +129,7 @@ async function handleMessage(
             settle('requeued');
             return;
         }
-
+        await options.afterApplied?.(event);
         ch.ack(msg);
         settle(applied ? 'acked' : 'skipped');
     } catch (err) {

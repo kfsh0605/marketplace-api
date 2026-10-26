@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { RedisModule } from './redis/redis.module';
 import { MessagingModule } from './messaging/messaging.module';
 import { ConfigModule } from '@nestjs/config';
 import { ProductsModule } from './products/products.module';
@@ -19,6 +20,7 @@ import { validateEnv } from './config/env.schema';
         HealthModule,
         DatabaseModule,
         MessagingModule,
+        RedisModule,
         ProductsModule,
     ],
     controllers: [],

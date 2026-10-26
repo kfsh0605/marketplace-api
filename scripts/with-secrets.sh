@@ -46,4 +46,7 @@ if [ -z "${RABBITMQ_URL:-}" ]; then
   export RABBITMQ_URL="amqp://${ENC_RMQ_USER}:${ENC_RMQ_PASSWORD}@${RABBITMQ_HOST:-localhost}:${RABBITMQ_PORT:-5672}"
 fi
 
+export REDIS_URL="${REDIS_URL:-redis://${REDIS_HOST:-127.0.0.1}:${REDIS_PORT:-6390}}"
+export REDIS_QUEUE_URL="${REDIS_QUEUE_URL:-redis://${REDIS_HOST:-127.0.0.1}:${REDIS_QUEUE_PORT:-6380}}"
+
 exec "$@"
