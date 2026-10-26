@@ -7,12 +7,13 @@ import { OrdersModule } from './orders/orders.module';
 import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
 import { validateEnv } from './config/env.schema';
+import { validateAuthEnv } from './config/auth-env';
 
 @Module({
     imports: [
         ConfigModule.forRoot({
             isGlobal: true,
-            validate: validateEnv,
+            validate: (config) => validateAuthEnv(validateEnv(config)),
         }),
         DatabaseModule,
         ProductsModule,

@@ -1,5 +1,8 @@
 import { z } from 'zod';
 
+const FROM_VAULT = 'не задана: секрет має приїхати зі сховища (bash scripts/with-secrets.sh dev <команда>)';
+const vaultString = () => z.string(FROM_VAULT).min(1, FROM_VAULT);
+
 export const envSchema = z.object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     PORT: z.coerce.number().int().positive().default(3000),
@@ -15,7 +18,10 @@ export const envSchema = z.object({
     REDIS_URL: z.string().min(1).optional(),
     REDIS_QUEUE_URL: z.string().min(1).optional(),
     REDIS_DISABLED: z.string().optional(),
-    TRUST_PROXY_HOPS: z.coerce.number().int().min(0).default(0),
+    TRUST_PROXY_HOPS: z.coerce.number().int().min(0).default(0),    JWT_KID: vaultString(),
+    JWT_PRIVATE_KEY: vaultString(),
+    JWT_PUBLIC_KEY: vaultString(),
+    REFRESH_TOKEN_PEPPER: vaultString().min(32, 'коротший за 32 символи: потрібен випадковий рядок від 32 байтів'),
 });
 export type Env = z.infer<typeof envSchema>;
 
