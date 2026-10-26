@@ -4,6 +4,10 @@ import { User } from './entities/user.entity';
 import { Product } from './entities/product.entity';
 import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
+import { UserRole } from './auth/roles';
+import { hashPassword } from './auth/password';
+
+const DEV_PASSWORD = 'marketplace-dev-password';
 
 async function seed() {
     await AppDataSource.initialize();
@@ -14,14 +18,21 @@ async function seed() {
     const orderItemRepo = AppDataSource.getRepository(OrderItem);
 
     console.log('Seeding users...');
-    const usersData = [
-        { email: 'olena.kravchenko@example.com', name: 'Олена Кравченко', balanceCents: 500_000 },
-        { email: 'ivan.petrenko@example.com', name: 'Іван Петренко', balanceCents: 500_000 },
-        { email: 'maria.bondar@example.com', name: 'Марія Бондар', balanceCents: 500_000 },
-        { email: 'andriy.tkachenko@example.com', name: 'Андрій Ткаченко', balanceCents: 500_000 },
-        { email: 'natalia.moroz@example.com', name: 'Наталія Мороз', balanceCents: 500_000 },
-        { email: 'dmytro.shevchenko@example.com', name: 'Дмитро Шевченко', balanceCents: 500_000 },
+    const seedUsers: Array<{ email: string; name: string; role: UserRole }> = [
+        { email: 'olena.kravchenko@example.com', name: 'Олена Кравченко', role: 'admin' },
+        { email: 'ivan.petrenko@example.com', name: 'Іван Петренко', role: 'seller' },
+        { email: 'maria.bondar@example.com', name: 'Марія Бондар', role: 'customer' },
+        { email: 'andriy.tkachenko@example.com', name: 'Андрій Ткаченко', role: 'customer' },
+        { email: 'natalia.moroz@example.com', name: 'Наталія Мороз', role: 'customer' },
+        { email: 'dmytro.shevchenko@example.com', name: 'Дмитро Шевченко', role: 'customer' },
     ];
+    const usersData = await Promise.all(
+        seedUsers.map(async (user) => ({
+            ...user,
+            balanceCents: 500_000,
+            passwordHash: await hashPassword(DEV_PASSWORD),
+        })),
+    );
     await userRepo.upsert(usersData, ['email']);
     const users = await userRepo.find({ order: { id: 'ASC' } });
 
