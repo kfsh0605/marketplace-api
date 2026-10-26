@@ -11,6 +11,7 @@ import { OrdersOrderItemsIndexes1789420020545 } from '../../../src/migrations/17
 import { CheckoutSchema1789593338925 } from '../../../src/migrations/1789593338925-CheckoutSchema';
 import { OutboxAndProcessedMessages1791300000000 } from '../../../src/migrations/1791300000000-OutboxAndProcessedMessages';
 import { IdempotencyKeys1791400000000 } from '../../../src/migrations/1791400000000-IdempotencyKeys';
+import { AuthTables1793000000000 } from '../../../src/migrations/1793000000000-AuthTables';
 
 export interface PgHandle {
     container: StartedPostgreSqlContainer;
@@ -34,7 +35,8 @@ export async function startPg(label = ''): Promise<PgHandle> {
             OrdersOrderItemsIndexes1789420020545,
             CheckoutSchema1789593338925,
             OutboxAndProcessedMessages1791300000000,
-            IdempotencyKeys1791400000000
+            IdempotencyKeys1791400000000,
+            AuthTables1793000000000,
         ],
         synchronize: false,
     });
