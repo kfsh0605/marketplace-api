@@ -1,21 +1,29 @@
 import request from 'supertest';
+import { bearer, createUser, loginAs } from './testkit/auth-helpers';
 import { E2eApp, bootstrapE2eApp } from './testkit/bootstrap-app';
 import { Product } from '../../src/entities/product.entity';
 
 describe('Orders E2E (повний Nest-застосунок, Postgres через testcontainer)', () => {
     let e2e: E2eApp;
+    let token: string;
 
     beforeAll(async () => {
         e2e = await bootstrapE2eApp();
-    }, 60_000);
+    }, 120_000);
 
     afterAll(async () => {
         await e2e.close();
     });
 
+    beforeEach(async () => {
+        await createUser(e2e, 'buyer@example.com', 'customer');
+        token = await loginAs(e2e, 'buyer@example.com');
+    });
+
     afterEach(async () => {
         await e2e.dataSource.query(
-            'TRUNCATE TABLE idempotency_keys, outbox, post_processing_jobs, order_items, orders, products, users RESTART IDENTITY CASCADE',        );
+            'TRUNCATE TABLE idempotency_keys, outbox, post_processing_jobs, order_items, orders, products, users RESTART IDENTITY CASCADE',
+        );
     });
 
     it('POST /orders -> 201, GET /orders/:id -> 200 з тим самим тілом', async () => {
@@ -26,12 +34,14 @@ describe('Orders E2E (повний Nest-застосунок, Postgres чере�
 
         const created = await request(e2e.app.getHttpServer())
             .post('/orders')
+            .set(bearer(token))
             .set('Idempotency-Key', 'e2e-key-1')
             .send({ customerEmail: 'ada@example.com', items: [{ productId: String(product.id), quantity: 2 }] })
             .expect(201);
 
         const fetched = await request(e2e.app.getHttpServer())
             .get(`/orders/${created.body.id}`)
+            .set(bearer(token))
             .expect(200);
 
         expect(fetched.body).toEqual(created.body);
@@ -39,7 +49,7 @@ describe('Orders E2E (повний Nest-застосунок, Postgres чере�
     });
 
     it('GET /orders/:id для неіснуючого замовлення -> 404', async () => {
-        await request(e2e.app.getHttpServer()).get('/orders/999999').expect(404);
+        await request(e2e.app.getHttpServer()).get('/orders/999999').set(bearer(token)).expect(404);
     });
 
     it('повторный POST с тем же Idempotency-Key: то же замовлення, заголовок Idempotency-Replay', async () => {
@@ -50,9 +60,9 @@ describe('Orders E2E (повний Nest-застосунок, Postgres чере�
         const body = { customerEmail: 'ada@example.com', items: [{ productId: String(product.id), quantity: 1 }] };
 
         const first = await request(e2e.app.getHttpServer())
-            .post('/orders').set('Idempotency-Key', 'e2e-key-2').send(body).expect(201);
+            .post('/orders').set(bearer(token)).set('Idempotency-Key', 'e2e-key-2').send(body).expect(201);
         const second = await request(e2e.app.getHttpServer())
-            .post('/orders').set('Idempotency-Key', 'e2e-key-2').send(body).expect(201);
+            .post('/orders').set(bearer(token)).set('Idempotency-Key', 'e2e-key-2').send(body).expect(201);
 
         expect(second.body).toEqual(first.body);
         expect(first.headers['idempotency-replay']).toBeUndefined();
@@ -64,7 +74,18 @@ describe('Orders E2E (повний Nest-застосунок, Postgres чере�
     it('POST /orders без Idempotency-Key: 400', async () => {
         await request(e2e.app.getHttpServer())
             .post('/orders')
+            .set(bearer(token))
             .send({ customerEmail: 'ada@example.com', items: [{ productId: '1', quantity: 1 }] })
             .expect(400);
+    });
+
+    it('усі маршрути замовлень закриті без токена: 401', async () => {
+        await request(e2e.app.getHttpServer()).get('/orders').expect(401);
+        await request(e2e.app.getHttpServer()).get('/orders/1').expect(401);
+        await request(e2e.app.getHttpServer())
+            .post('/orders')
+            .set('Idempotency-Key', 'no-token')
+            .send({ customerEmail: 'ada@example.com', items: [{ productId: '1', quantity: 1 }] })
+            .expect(401);
     });
 });

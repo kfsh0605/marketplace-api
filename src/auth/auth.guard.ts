@@ -6,9 +6,11 @@ import {
     ServiceUnavailableException,
     UnauthorizedException,
 } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import type { Response } from 'express';
 import { AccessDenylist } from './access-denylist';
 import type { AuthenticatedRequest } from './authenticated-request';
+import { IS_PUBLIC_KEY } from './public.decorator';
 import { AccessPrincipal, TokenService } from './token.service';
 
 const BEARER_PATTERN = /^Bearer\s+(\S+)$/i;
@@ -20,9 +22,22 @@ export class AuthGuard implements CanActivate {
     constructor(
         private readonly tokens: TokenService,
         private readonly denylist: AccessDenylist,
+        private readonly reflector: Reflector,
     ) {}
 
     async canActivate(context: ExecutionContext): Promise<boolean> {
+        if (context.getType() !== 'http') {
+            return true;
+        }
+
+        const isPublic = this.reflector.getAllAndOverride<boolean | undefined>(IS_PUBLIC_KEY, [
+            context.getHandler(),
+            context.getClass(),
+        ]);
+        if (isPublic) {
+            return true;
+        }
+
         const http = context.switchToHttp();
         const request = http.getRequest<AuthenticatedRequest>();
         const response = http.getResponse<Response>();

@@ -1,4 +1,5 @@
 import { Inject, Injectable, Module, OnApplicationShutdown } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import type { Redis } from 'ioredis';
 import { User } from '../entities/user.entity';
@@ -10,6 +11,7 @@ import { AuthGuard } from './auth.guard';
 import { AuthService } from './auth.service';
 import { KeyStore } from './key-store';
 import { RefreshTokenService } from './refresh-token.service';
+import { RolesGuard } from './roles.guard';
 import { TokenService } from './token.service';
 
 @Injectable()
@@ -35,9 +37,10 @@ class AuthRedisShutdown implements OnApplicationShutdown {
         TokenService,
         RefreshTokenService,
         AuthService,
-        AuthGuard,
+        { provide: APP_GUARD, useClass: AuthGuard },
+        { provide: APP_GUARD, useClass: RolesGuard },
         AuthRedisShutdown,
     ],
-    exports: [TokenService, AccessDenylist, AuthGuard],
+    exports: [TokenService, AccessDenylist],
 })
 export class AuthModule {}
