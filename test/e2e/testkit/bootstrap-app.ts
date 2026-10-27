@@ -9,6 +9,7 @@ import { User } from '../../../src/entities/user.entity';
 import { Product } from '../../../src/entities/product.entity';
 import { Order } from '../../../src/entities/order.entity';
 import { OrderItem } from '../../../src/entities/order-item.entity';
+import { GenericContainer, Wait } from 'testcontainers';
 import { PostProcessingJob } from '../../../src/entities/post-processing-job.entity';
 import { Init1788985076642 } from '../../../src/migrations/1788985076642-Init';
 import { AddProductsNameUnique1789030528991 } from '../../../src/migrations/1789030528991-AddProductsNameUnique';
@@ -40,6 +41,10 @@ export interface E2eApp {
 export async function bootstrapE2eApp(): Promise<E2eApp> {
     const container = await new PostgreSqlContainer('postgres:16-alpine').start();
     const uri = container.getConnectionUri();
+    const redisContainer = await new GenericContainer('redis:8.4-alpine')
+        .withExposedPorts(6379)
+        .withWaitStrategy(Wait.forLogMessage(/Ready to accept connections/))
+        .start();
 
     const migrationDataSource = new DataSource({
         type: 'postgres',
@@ -65,6 +70,7 @@ export async function bootstrapE2eApp(): Promise<E2eApp> {
     process.env.DB_NAME = 'e2e-placeholder';
     process.env.RABBITMQ_DISABLED = '1';
     process.env.REDIS_DISABLED = '1';
+    process.env.REDIS_QUEUE_URL = `redis://${redisContainer.getHost()}:${redisContainer.getMappedPort(6379)}`;
     setAuthEnv();
     const { AppModule } = require('../../../src/app.module') as { AppModule: typeof AppModuleType };
 
@@ -81,6 +87,7 @@ export async function bootstrapE2eApp(): Promise<E2eApp> {
             await app.close();
             await migrationDataSource.destroy();
             await container.stop();
+            await redisContainer.stop();
             delete process.env.DATABASE_URL;
             delete process.env.DB_HOST;
             delete process.env.DB_USER;
@@ -91,6 +98,7 @@ export async function bootstrapE2eApp(): Promise<E2eApp> {
             delete process.env.JWT_PRIVATE_KEY;
             delete process.env.JWT_PUBLIC_KEY;
             delete process.env.REFRESH_TOKEN_PEPPER;
+            delete process.env.REDIS_QUEUE_URL;
         },
     };
 }

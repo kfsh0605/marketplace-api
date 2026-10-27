@@ -6,5 +6,6 @@ export function buildSwaggerConfig() {
         .setDescription('API для навчального курсового проєкту: товари та замовлення')
         .setVersion('1.0.0')
         .addServer('http://localhost:3000', 'Локальний сервер розробки')
+        .addBearerAuth()
         .build();
 }
