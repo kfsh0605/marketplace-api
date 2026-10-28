@@ -58,6 +58,8 @@ npm install
 | `REDIS_DISABLED` | ні | `1` вимикає Redis повністю: API працює без кешу й ліміту (e2e-тести і CI без Redis) |
 | `TRUST_PROXY_HOPS` | ні (`0` за замовч.) | Скільки reverse-proxy стоїть перед API; потрібно, щоб rate-limit бачив справжній IP клієнта з `X-Forwarded-For` |
 
+Змінні AuthN/AuthZ (`JWT_KID`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `REFRESH_TOKEN_PEPPER`) не мають дефолтів і описані з джерелом окремою таблицею в розділі «Auth».
+
 Пароль PostgreSQL **не** є змінною середовища — він читається застосунком з файлу `secrets/db_password` (`src/database/database.module.ts`), причому файл перечитується заново при кожному новому підключенні до БД. Це і дозволяє міняти пароль без рестарту застосунку (див. розділ "Ротація" нижче).
 
 Конфігурація зі схеми (`src/config/env.schema.ts`, Zod) валідується одразу при старті застосунку через `ConfigModule.forRoot({ validate })`. Якщо обов'язкова змінна відсутня або має неправильний тип — застосунок **не стартує** і одразу завершується з ненульовим кодом виходу та переліком усіх помилок одразу (fail-fast), замість того щоб впасти пізніше під час роботи.
@@ -323,6 +325,8 @@ Provider verification (`test/contract/verify-provider.ts`) піднімає сп
 
     npm run generate:openapi
 
+Після ДЗ №24 застосунок не стартує без ключів, тому скрипт іде через `bash scripts/with-secrets.sh dev …` (потрібні `npm run build` і запущений `redis-queue` з `docker compose up -d --wait`). У специфікації з’явилися `POST /auth/login|refresh|logout` та схема безпеки `bearer`.
+
 Шлях і форма відповіді в consumer-інтеракції відповідають ендпойнту `/products/{productId}` з цієї специфікації.
 
 ### Pact Broker локально
@@ -395,6 +399,19 @@ Provider verification (`test/contract/verify-provider.ts`) піднімає сп
     export REDIS_URL=redis://127.0.0.1:6390
     export REDIS_QUEUE_URL=redis://127.0.0.1:6380
     export SKIP_VAULT=1    # у грейдера немає доступу до сховища
+    eval "$(node -e '
+    const { generateKeyPairSync, randomBytes } = require("node:crypto");
+    const { privateKey, publicKey } = generateKeyPairSync("ec", {
+      namedCurve: "P-256",
+      privateKeyEncoding: { type: "pkcs8", format: "pem" },
+      publicKeyEncoding: { type: "spki", format: "pem" },
+    });
+    const b64 = (pem) => Buffer.from(pem).toString("base64");
+    console.log("export JWT_KID=grader-oneoff");
+    console.log("export JWT_PRIVATE_KEY=" + b64(privateKey));
+    console.log("export JWT_PUBLIC_KEY=" + b64(publicKey));
+    console.log("export REFRESH_TOKEN_PEPPER=" + randomBytes(32).toString("base64url"));
+    ')"
     docker compose up -d --wait
 
     npm ci
@@ -430,6 +447,10 @@ Provider verification (`test/contract/verify-provider.ts`) піднімає сп
     npm run demo:ratelimit
     npm run demo:queue
 
+    npm run demo:auth
+    npm run demo:reuse
+    npm run demo:rbac
+
     psql -h 127.0.0.1 -p 6432 -U marketplace -d marketplace -c "SELECT 1"
     psql -h 127.0.0.1 -p 6432 -U marketplace -d pgbouncer -c "SHOW POOLS"
 
@@ -446,6 +467,8 @@ Provider verification (`test/contract/verify-provider.ts`) піднімає сп
 **Outbox (ДЗ №22).** Брокерна змінна читається так: `RABBITMQ_URL`, а якщо її нема — `BROKER_URL` (`src/messaging/rabbitmq.config.ts`); URL має вигляд `amqp://marketplace:<пароль>@127.0.0.1:5672` (AMQP-порт **5672**, не 15672). Три нові демо (`demo:outbox`, `demo:crash-write`, `demo:crash-relay`) запускаються через `bash scripts/with-secrets.sh dev …`, а з `SKIP_VAULT=1` обгортка просто виконує команду, тож `DB_*` і `RABBITMQ_URL`/`BROKER_URL` мають бути експортовані (як вище). Нових env-файлів нема, у git немає жодного файлу з живим рядком підключення. Команда `npm run migrate` створює таблиці `outbox`, `processed_messages` і `idempotency_keys`. Демо самоочисні, мають повторюватися з тими самими числами, і перед ними не мають працювати `npm run relay` і `npm run consumer`. Деталі, власні числа та обґрунтування — розділ «Outbox та ідемпотентність (ДЗ №22)».
 
 **Redis (ДЗ №23).** Обидва Redis піднімає та сама `docker compose up -d --wait` (healthcheck `redis-cli ping`, тож після повернення команди вони готові). Порти: **6390** (кеш, `allkeys-lru`) і **6380** (черга й сесії, `noeviction` + AOF), обидва на `127.0.0.1` і поза діапазоном 22300–22399. Порт 6379 свідомо не зайнято: на машині розробника його часто тримає чужий Redis, і застосунок тихо працював би з ним. З `SKIP_VAULT=1` обгортка `with-secrets.sh` не виконується, тому `REDIS_URL` і `REDIS_QUEUE_URL` грейдер експортує сам (див. команди вище). Чотири нові демо (`demo:cache`, `demo:session`, `demo:ratelimit`, `demo:queue`) запускаються через `bash scripts/with-secrets.sh dev …`, друкують `key=number`, самі перевіряють інваріанти, завершуються кодом 0 і прибирають за собою свої ключі (BullMQ-демо працює у власному префіксі `bull-demo`). `demo:cache` і `demo:queue` читають `CONFIG GET maxmemory-policy` з живого з'єднання, тому підключення до не того інстансу (наприклад, обидва URL на кеш) дає `FAIL`, а не фальшиву «зелень». Нових env-файлів немає, у dev-Redis немає пароля, у git немає жодного рядка підключення з обліковими даними. Деталі та власні числа: розділ «Redis: кеш, сесії, ліміти, черга».
+
+**Auth (ДЗ №24).** Ключів і pepper у git немає (`secrets/jwt/` у `.gitignore`, у `.env.example` змінні порожні). Грейдер без сховища генерує одноразову пару ES256 (`generateKeyPairSync('ec', { namedCurve: 'P-256', … })`, PEM у base64) і експортує `JWT_KID`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `REFRESH_TOKEN_PEPPER` командою з блоку вище; разом із `SKIP_VAULT=1` обгортка `with-secrets.sh` просто виконує команду, не чіпаючи оточення. `DATABASE_URL` експортується так само, як і раніше. Таблиця `refresh_tokens` створюється `npm run migrate`, тож перед демо потрібні `npm run build` і `npm run migrate` (вони є вище). Голий `npm run start` без цих змінних завершується з ненульовим кодом і називає відсутню змінну. Три демо (`demo:auth`, `demo:reuse`, `demo:rbac`) самі стартують застосунок у процесі, самі прибирають за собою, друкують `key=number` і завершуються ненульовим кодом при порушенні інваріанта; їм потрібні Postgres і `redis-queue` (`REDIS_QUEUE_URL`) з `docker compose up -d --wait`. Деталі: розділ «Auth».
 
 Якщо `psql` немає на машині грейдера локально — той самий `SELECT 1`/`SHOW POOLS` перевіряється зсередини вже запущеного контейнера `postgres`, який має власний psql-клієнт:
 
@@ -841,6 +864,156 @@ Postgres і RabbitMQ не мають спільної транзакції (dual
 - з `REDIS_DISABLED=1` картка читається з бази, в Redis не з'являється жодного ключа (`DBSIZE 0`), а 35 запитів дали 35 разів `400` без жодного `429`;
 - перший запуск воркера: `send-receipt` для замовлень 79 і 80 виконано, очищення outbox видалило 31 надісланий рядок старше 7 діб; повторний запуск із іншим інтервалом залишив `ZCARD bull:order-tasks:repeat` рівним 1.
 
+## Auth
+
+AuthN і AuthZ для API (ДЗ №24): короткий access JWT, підписаний асиметрично (ES256), непрозорий refresh-токен із ротацією та виявленням повторного використання, logout, що справді відкликає сесію, і два рівні RBAC (роль та власник ресурсу). Код живе в `src/auth/`.
+
+### Змінні та їхнє джерело
+
+У таблиці `<env>` — це `dev` або `prod`. Ключі й pepper **не мають дефолтів**: застосунок без них не стартує. Конфіг валідується в `ConfigModule.forRoot({ validate })` до підключення до БД, тож голий `npm run start` завершується з ненульовим кодом і називає відсутню змінну, а не падає пізніше в рантаймі.
+
+| Змінна | Обов'язкова | Джерело | Опис |
+|--------|:-----------:|---------|------|
+| `JWT_KID` | так | сховище: `secrets/jwt/<env>/kid` через `scripts/with-secrets.sh` | Ідентифікатор поточного ключа підпису (`dev-2026-10-26`). Потрапляє в заголовок `kid` кожного access-токена |
+| `JWT_PRIVATE_KEY` | так | сховище: `secrets/jwt/<env>/private.pem` через `scripts/with-secrets.sh` | Приватний ключ ES256 (EC P-256, PKCS#8), PEM у base64. Підписує access-токени |
+| `JWT_PUBLIC_KEY` | так | сховище: `secrets/jwt/<env>/public.pem` через `scripts/with-secrets.sh` | Публічний ключ тієї ж пари (SPKI), PEM у base64. Перевіряє підпис; при старті звіряється з приватним за відбитком |
+| `REFRESH_TOKEN_PEPPER` | так | сховище: `secrets/jwt/<env>/refresh_pepper` через `scripts/with-secrets.sh` | Секрет для `HMAC-SHA256` refresh-токена, щонайменше 32 символи. У БД лежить лише `HMAC(pepper, token)` |
+| `REDIS_QUEUE_URL` | так для Auth (у загальній схемі необов'язкова) | обгортка `with-secrets.sh` (дефолт `redis://127.0.0.1:6380`) або змінні середовища платформи | Інстанс `redis-queue` (`noeviction` + AOF) для denylist. `REDIS_DISABLED` Auth ігнорує: без Redis logout не може бути чесним |
+
+TTL і алгоритм — не змінні середовища, а константи коду (`src/auth/auth.constants.ts`): access живе 600 с, refresh — 7 діб простою і 30 діб абсолютно від першого логіну, алгоритм лише `ES256`.
+
+Згенерувати ключі (приватні файли лежать у `secrets/jwt/`, який у `.gitignore`):
+
+    node scripts/gen-jwt-keys.mjs dev
+    node scripts/gen-jwt-keys.mjs prod
+
+Скрипт друкує `[fp] <dev|prod>=<8 hex> kid=<kid>` і відмовляється перезаписувати наявні ключі без `--force` (перегенерація вбиває всі видані токени).
+
+### Відбитки ключів
+
+Відбиток — перші 8 hex-символів SHA-256 від DER-представлення публічного ключа (SPKI). Приватний ключ у git не потрапляє, а за відбитком видно, який саме ключ працює: застосунок друкує при старті `ключ підпису: kid=… fp=…`.
+
+| Середовище | `kid` | Відбиток |
+|------------|-------|----------|
+| dev | `dev-2026-10-26` | `7392731b` |
+| prod | `prod-2026-10-26` | `1e667d9e` |
+
+### Access-токен
+
+JWT ES256 із заголовком `kid` і claims `iss`, `aud`, `sub` (id користувача), `jti`, `exp`, `iat`, `role`, `fid` (id родини refresh-токенів). Перевірка (`TokenService.verifyAccess`) завжди йде з явним списком `algorithms: ['ES256']`: токен із `alg: none` або `HS256` (атака підміни алгоритму, де публічний ключ використовують як HMAC-секрет) відхиляється ще до перевірки підпису. Ключ береться за `kid` із `KeyStore`; невідомий `kid` означає 401. `iss` і `aud` перевіряє `jsonwebtoken`, а наявність і тип `sub`, `jti`, `exp`, `fid` і допустиму `role` застосунок перевіряє вручну, бо сама бібліотека `exp` не вимагає. Claim `role` у токені — лише підказка: права завжди читаються з БД (див. RBAC).
+
+Бібліотека — `jsonwebtoken` (CJS). `jose` 6 є ESM-only і не працює під Jest 30 на Node 22.
+
+### Refresh-токен: ротація та виявлення повторного використання
+
+Refresh — 32 випадкові байти в base64url, не JWT. У БД (таблиця `refresh_tokens`, міграція `AuthTables`) зберігається `token_hash = HMAC-SHA256(pepper, token)`: витік дампу бази не дає жодного придатного токена, а звичайний SHA-256 без pepper дозволив би перебір.
+
+Усі токени одного логіну мають спільний `family_id`. Кожен `POST /auth/refresh`:
+
+1. у транзакції блокує рядок `SELECT … FOR UPDATE` за `token_hash`;
+2. якщо токен уже використаний (`revoked_at IS NOT NULL`) — це **повторне використання**: відкликається вся родина (`UPDATE … SET revoked_at = now() WHERE family_id = …`), у лог іде рядок `[ІНЦИДЕНТ] refresh_reuse_detected — family=… user=… відкликано рядків: N`, клієнт отримує 401;
+3. інакше старий рядок відкликається і створюється новий у тій самій родині, а нова пара (access + refresh) віддається клієнту.
+
+Відкликання та видача нової пари — **один COMMIT**: або обидва, або жоден. Колбек транзакції *повертає* результат, а 401 кидається вже після COMMIT. Якби виняток летів зсередини, транзакція відкотилася б разом із відкликанням родини, і виявлення повтору нічого б не зробило. Пільгового вікна (grace) немає: другий refresh тим самим токеном завжди є сигналом крадіжки. Ціна — законний клієнт, що повторив запит після обриву мережі, буде розлогінений; це свідомий вибір на користь безпеки.
+
+Для родини діють два обмеження: простій 7 діб (`expires_at` кожного нового токена) і абсолютний ліміт 30 діб від початку родини: `expires_at = LEAST(now() + 7d, family_started_at + 30d)`. Без другого активний клієнт ніколи б не розлогінювався.
+
+Після виявлення повтору активні access-токени цієї родини теж гаснуть: у denylist ставиться `deny:fam:<family_id>` з TTL = життя access-токена (600 с). Це best-effort: якщо Redis недоступний, родина вже відкликана в БД, тож максимум 10 хвилин живе лише вже виданий access.
+
+### Logout: чому це дві дії, а не одна
+
+`POST /auth/logout` (204) робить дві окремі речі в двох різних сховищах, і **атомарними вони бути не можуть**: Postgres і Redis не діляться транзакцією.
+
+1. У БД родина refresh-токенів відкликається (`revoked_at`). Після цього отримати нову пару неможливо.
+2. У Redis ставиться `deny:jti:<jti>` з TTL = залишок життя access-токена. Після цього поточний access перестає працювати відразу, а не через 10 хвилин. TTL = залишок, бо після `exp` токен і так мертвий: запис не росте нескінченно.
+
+Порядок навмисний: **спочатку БД, потім Redis**. Якщо впаде між кроками, найгірше — access-токен проживе до свого `exp` (щонайбільше 10 хвилин), але refresh уже мертвий. Зворотний порядок залишив би живу сесію, яку користувач вважає закритою. Якщо Redis недоступний на кроці 2, API відповідає 503 «повторіть logout»; операція ідемпотентна: повторний виклик знаходить родину вже відкликаною, пропускає крок 1 і доробляє крок 2.
+
+Denylist живе саме в `redis-queue`, а не в `redis-cache`: кеш має `allkeys-lru` і при тиску пам'яті мовчки викинув би запис про відкликаний токен. `redis-queue` — `noeviction` + AOF. Перевірка denylist — fail-closed: якщо Redis не відповів, запит із access-токеном отримує 503, а не пропускається. In-memory запасного варіанту немає навмисно: для кількох інстансів він би розійшовся.
+
+### 401 проти 403
+
+| Код | Значення | Приклад | Що робить клієнт |
+|-----|----------|---------|------------------|
+| 401 | «не впізнаю»: токена немає, прострочений, підпис/alg/kid/aud невірні, у denylist, родина відкликана | `GET /orders` без заголовка; підроблений токен; після logout | SDK оновлює токен через refresh і повторює запит |
+| 403 | «впізнаю, але не дозволено» | `customer` робить `POST /products`; чуже `GET /orders/{id}` | Повтор безглуздий, refresh нічого не змінить |
+
+401 завжди містить `WWW-Authenticate: Bearer`. Помилки йдуть у форматі RFC 9457 (`application/problem+json`) через `ProblemExceptionFilter`.
+
+### RBAC: два рівні
+
+**Рівень ролі** (`@Roles('seller', 'admin')` + глобальний `RolesGuard`): `POST /products` і `PATCH /orders/:id/status` дозволені лише `seller` і `admin`, `customer` отримує 403. Читання товарів і `/health` позначені `@Public()`. Роль гард бере **з БД**, а не з claim `role`.
+
+**Рівень власника** (`OrdersService.assertCanView`, не гард): `GET /orders/{foreign}` дає 403. Перевірка живе в сервісі, а не в гарді, бо гард не знає, чий саме це рядок, поки не прочитає його з БД; а сервіс у будь-якому випадку читає рядок. Порядок: `SELECT "userId"` → 404, якщо замовлення немає → 403, якщо ти не власник і не `admin`. Списки (`GET /orders`) фільтруються в `WHERE` за `userId`, тож чужого там просто нема. SSE-підписка перевіряється до `writeHead`, щоб відмову ще можна було віддати нормальним статусом.
+
+**Де проходить межа.** Токен доводить *хто ти був на момент видачі*. Права — *що тобі дозволено зараз* — читаються з БД на кожному запиті. Тому понижений адмін (скажімо, `admin` → `customer`) зі своїм ще чинним access-токеном:
+
+- лишається **автентифікованим** до `exp` (до 10 хвилин): підпис і строк дійсні, і це не помилка, бо токен нічого не стверджує про поточні права;
+- але **негайно втрачає права**: `RolesGuard` і перевірка власника читають роль із БД, тож claim `role: "admin"` у його токені нічого не дає;
+- щоб прибрати і автентифікацію, потрібно відкликати родину (`revokeFamily`) і поставити `deny:fam:<fid>`.
+
+Підроблений токен (змінений claim `role` без перепідпису) відхиляється як 401 на перевірці підпису: це перевіряє `demo:rbac` (`tampered=401`).
+
+Ключ ідемпотентності `Idempotency-Key` обмежений користувачем (`"<userId>:<key>"`): інакше чужий клієнт міг би повторити ключ і отримати відповідь на чуже замовлення.
+
+### Ротація ключів з перекриттям і роль `kid`
+
+`kid` — це «номерок» ключа в заголовку токена. Без нього перевіряючий мав би єдиний ключ і не міг би змінити його без миттєвого знецінення всіх токенів. З ним `KeyStore` тримає мапу `kid → публічний ключ` і обирає потрібний за заголовком. Ротація з перекриттям:
+
+1. Згенерувати нову пару з новим `kid` (`node scripts/gen-jwt-keys.mjs prod --force` у новий каталог або з новою датою в `kid`).
+2. Розкотити на всі інстанси **перевірку** обох ключів (старий і новий публічні в мапі), підпис ще старим.
+3. Перемкнути **підпис** на новий ключ: нові токени йдуть з новим `kid`, старі ще перевіряються.
+4. Почекати щонайменше `ACCESS_TTL` (10 хвилин) плюс запас: усі токени зі старим `kid` вичерпали життя.
+5. Прибрати старий публічний ключ із мапи і знищити приватний.
+
+Refresh-токени непрозорі й не прив'язані до ключа, тому ротація їх не зачіпає: навіть без перекриття (миттєва заміна) клієнти отримали б 401 лише на access, SDK зробив би refresh і продовжив з новим `kid`. Перекриття прибирає і ці 401.
+
+Що реалізовано в цій ДЗ: `KeyStore` вже є мапою за `kid` і відхиляє невідомий `kid`, але реєструє лише один ключ (поточний з `JWT_KID`/`JWT_PUBLIC_KEY`). Кроки 2 і 4 вимагають додати до мапи попередній публічний ключ (окрема пара змінних із сховища); це місце розширення, у цій роботі воно не доробляється.
+
+### Запуск і демо
+
+Усі три демо самі стартують Nest у процесі на порту 0, створюють тимчасових користувачів `demo-<ім'я>-<hex>@example.com`, самі прибирають за собою (і перевіряють, що нічого не лишилося), друкують `key=number` і завершуються з кодом ≠ 0 при порушенні інваріанта. Потрібні `docker compose up -d --wait`, `npm run build` і `npm run migrate`; запускаються через `bash scripts/with-secrets.sh dev …`, тому ключі беруться зі сховища:
+
+    npm run build
+    npm run migrate
+    npm run demo:auth
+    npm run demo:reuse
+    npm run demo:rbac
+
+Очікуваний вивід (кожна пара `ключ=число` на окремому рядку; три демо наведено підряд):
+
+    login=200
+    no-token=401
+    with-token=200
+    refresh=200
+    logout=204
+    after-logout=401
+    refresh-after-logout=401
+
+    login=200
+    r1-refresh=200
+    r1-reuse=401
+    r2-after-reuse=401
+
+    anon=401
+    own=200
+    foreign=403
+    role-denied=403
+    role-allowed=201
+    tampered=401
+
+Після ключів кожне демо друкує `OK: усі інваріанти виконано` і завершується кодом 0. `demo:reuse` пише рядок `[ІНЦИДЕНТ] refresh_reuse_detected …` у stderr. Серверна частина: `npm run start:vault` (`npm run build && bash scripts/with-secrets.sh dev node dist/main.js`). Голий `npm run start` без змінних з таблиці вище завершується з ненульовим кодом і назвою відсутньої змінної.
+
+Тести: `npm run test:unit` (TokenService), `npm run test:integration` (refresh-токени, denylist), `npm run test:e2e` (auth, RBAC продуктів, власність замовлень). Integration і e2e піднімають Postgres 16 і Redis 8.4 через Testcontainers, тож потрібен Docker.
+
+### Відомі прогалини
+
+- WebSocket-шлюз у `join` бере `userId` із payload, а не з токена: аутентифікація сокетів у цю ДЗ не входила.
+- Логін не має rate limit (є ліміт на `POST /orders` із ДЗ №23). Перебір паролів стримує лише argon2id (m=19456, t=2, p=1) і однакова відповідь на «немає користувача» та «невірний пароль» (з dummy-хешем для вирівнювання часу).
+- `EventSource` у браузері не вміє надсилати `Authorization`, тож SSE із браузера потребує cookie-схеми або fetch-стріму.
+- 403 замість 404 на чуже замовлення розкриває, що замовлення з таким id існує.
+- У `seller` немає зв'язку із замовленнями, тому `PATCH /orders/:id/status` — це лише `@Roles('seller', 'admin')`, без перевірки «замовлення містить мої товари». Це місце для ReBAC-кортежів (бонус).
+
 ## Структура
 
 | Шлях                          | Призначення                                      |
@@ -920,5 +1093,11 @@ Postgres і RabbitMQ не мають спільної транзакції (dual
 | `src/sessions/`, `src/session-probe.ts` | Сесії в Redis: `SessionStore` (`GETEX`, rolling TTL), middleware з cookie; дочірній процес для демо |
 | `src/ratelimit/` | Ковзне вікно (ZSET + Lua, час із `TIME`), Express-middleware для демо і `RateLimitGuard` для Nest |
 | `src/queue/` | `order-tasks.ts` (черга, `jobId`-дедуп, backoff з джитером, `upsertJobScheduler`), `order-tasks-worker.ts`, `run-worker.ts` (`npm run queue:worker`) |
+| `src/auth/` | AuthN/AuthZ: `token.service.ts` (ES256, явний `algorithms`), `key-store.ts` (`kid → ключ`), `refresh-token.service.ts` (ротація, виявлення повтору), `access-denylist.ts` (Redis), `auth.service.ts` / `auth.controller.ts` (`/auth/login`, `/refresh`, `/logout`), глобальні `auth.guard.ts` і `roles.guard.ts`, декоратори `@Public()`, `@Roles()`, `@CurrentUser()` |
+| `src/config/auth-env.ts`, `src/config/jwt-keys.ts` | Валідація ключів до старту (формат, EC P-256, відповідність пари за відбитком) |
+| `src/migrations/1793000000000-AuthTables.ts` | Таблиця `refresh_tokens` (`token_hash`, `family_id`, `revoked_at`, `expires_at`, `family_started_at`) |
+| `src/lib/auth-demo-kit.ts`, `src/demo-auth.ts`, `src/demo-reuse.ts`, `src/demo-rbac.ts` | `npm run demo:auth`, `demo:reuse`, `demo:rbac` (самозапуск, самоочищення, `key=number`) |
+| `scripts/gen-jwt-keys.mjs` | `npm run keys:gen -- <env>`: ES256-пара, `kid`, pepper у `secrets/jwt/<slug>/` та відбиток |
+| `test/unit/token.service.spec.ts`, `test/integration/refresh-tokens.spec.ts`, `test/integration/access-denylist.spec.ts`, `test/e2e/auth*.spec.ts`, `test/e2e/*rbac*.spec.ts`, `test/e2e/orders.ownership.e2e.spec.ts` | Тести Auth: unit, integration (Postgres і Redis у Testcontainers), e2e |
 | `src/lib/query-counter.ts`, `src/lib/demo-output.ts` | Логер TypeORM, що рахує запити за тегом; спільний друк `key=number` і перевірки інваріантів для демо |
 | `src/demo-cache.ts`, `src/demo-session.ts`, `src/demo-ratelimit.ts`, `src/demo-queue.ts` | `npm run demo:cache`, `demo:session`, `demo:ratelimit`, `demo:queue` |
