@@ -4,6 +4,7 @@ import {
     ApiCreatedResponse,
     ApiForbiddenResponse,
     ApiHeader,
+    ApiNotFoundResponse,
     ApiOkResponse,
     ApiOperation,
     ApiParam,
@@ -51,7 +52,7 @@ export class OrdersController {
     @ApiOperation({ operationId: 'getOrder', summary: 'Отримати замовлення за id' })
     @ApiParam({ name: 'orderId', example: 'o-1' })
     @ApiOkResponse({ type: Order })
-    @ApiForbiddenResponse({ description: 'Замовлення належить іншому користувачу' })
+    @ApiNotFoundResponse({ description: 'Замовлення не існує або належить іншому користувачу' })
     findOne(@Param('orderId') orderId: string, @CurrentUser() user: AccessPrincipal) {
         return this.ordersService.findOneFor(orderId, user.userId);
     }
@@ -94,7 +95,7 @@ export class OrdersController {
     @Get(':orderId/events')
     @ApiOperation({ operationId: 'streamOrderEvents', summary: 'SSE-потік подій зміни статусу замовлення' })
     @ApiParam({ name: 'orderId', example: 'o-1' })
-    @ApiForbiddenResponse({ description: 'Замовлення належить іншому користувачу' })
+    @ApiNotFoundResponse({ description: 'Замовлення не існує або належить іншому користувачу' })
     async streamEvents(
         @Param('orderId') orderId: string,
         @Headers('last-event-id') lastEventIdHeader: string | undefined,

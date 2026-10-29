@@ -72,7 +72,7 @@ void runStandalone(async (failures) => {
         expectEq(failures, 'підготовка: замовлення Bob створено', bobOrder !== '', true);
         expectEq(failures, 'anon', anon.status, 401);
         expectEq(failures, 'own', own.status, 200);
-        expectEq(failures, 'foreign', foreign.status, 403);
+        expectEq(failures, 'foreign', foreign.status, 404);
         expectEq(failures, 'role-denied', roleDenied.status, 403);
         expectEq(failures, 'role-allowed', [200, 201].includes(roleAllowed.status), true);
         expectEq(failures, 'tampered', tampered.status, 401);

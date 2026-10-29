@@ -5,7 +5,7 @@ import { User } from '../../src/entities/user.entity';
 import { bearer, createUser, loginAs } from './testkit/auth-helpers';
 import { E2eApp, bootstrapE2eApp } from './testkit/bootstrap-app';
 
-describe('Orders E2E: владіння замовленням (403 на чужий) і ізоляція даних', () => {
+describe('Orders E2E: владіння замовленням (404 на чужий) і ізоляція даних', () => {
     let e2e: E2eApp;
     let productId: string;
     let ownerId: number;
@@ -80,20 +80,20 @@ describe('Orders E2E: владіння замовленням (403 на чужи
         expect(res.body.id).toBe(orderId);
     });
 
-    it('чужий customer: 403 problem+json, без WWW-Authenticate (це не 401)', async () => {
+    it('чужий customer: 404 problem+json, без WWW-Authenticate (це не 401)', async () => {
         const orderId = await placeOrder(ownerToken, 'own-3');
 
-        const res = await http().get(`/orders/${orderId}`).set(bearer(strangerToken)).expect(403);
+        const res = await http().get(`/orders/${orderId}`).set(bearer(strangerToken)).expect(404);
 
         expect(res.headers['content-type']).toContain('application/problem+json');
-        expect(res.body.title).toBe('Forbidden');
+        expect(res.body.title).toBe('Not Found');
         expect(res.headers['www-authenticate']).toBeUndefined();
     });
 
-    it('seller не отримує чужі замовлення лише через роль: 403', async () => {
+    it('seller не отримує чужі замовлення лише через роль: 404', async () => {
         const orderId = await placeOrder(ownerToken, 'own-4');
 
-        await http().get(`/orders/${orderId}`).set(bearer(sellerToken)).expect(403);
+        await http().get(`/orders/${orderId}`).set(bearer(sellerToken)).expect(404);
     });
 
     it('admin бачить чужі замовлення: 200', async () => {
@@ -113,7 +113,7 @@ describe('Orders E2E: владіння замовленням (403 на чужи
 
         await e2e.dataSource.getRepository(User).update({ email: 'admin@example.com' }, { role: 'customer' });
 
-        await http().get(`/orders/${orderId}`).set(bearer(adminToken)).expect(403);
+        await http().get(`/orders/${orderId}`).set(bearer(adminToken)).expect(404);
     });
 
     it('GET /orders: customer бачить лише свої, admin бачить усі', async () => {
@@ -156,12 +156,23 @@ describe('Orders E2E: владіння замовленням (403 на чужи
         expect(ok.body.status).toBe('paid');
     });
 
-    it('SSE /orders/:id/events: чужий -> 403 до відкриття потоку, без токена -> 401', async () => {
+    it('SSE /orders/:id/events: чужий -> 404 до відкриття потоку, без токена -> 401', async () => {
         const orderId = await placeOrder(ownerToken, 'sse-1');
 
-        const foreign = await http().get(`/orders/${orderId}/events`).set(bearer(strangerToken)).expect(403);
+        const foreign = await http().get(`/orders/${orderId}/events`).set(bearer(strangerToken)).expect(404);
         await http().get(`/orders/${orderId}/events`).expect(401);
 
         expect(foreign.headers['content-type']).not.toContain('text/event-stream');
+    });
+
+    it('чужий і неіснуючий id неможливо відрізнити за статусом і заголовком', async () => {
+        const orderId = await placeOrder(ownerToken, 'own-7');
+
+        const foreign = await http().get(`/orders/${orderId}`).set(bearer(strangerToken));
+        const missing = await http().get('/orders/999999').set(bearer(strangerToken));
+
+        expect(foreign.status).toBe(missing.status);
+        expect(foreign.body.title).toBe(missing.body.title);
+        expect(foreign.body.detail.replace(orderId, 'X')).toBe(missing.body.detail.replace('999999', 'X'));
     });
 });

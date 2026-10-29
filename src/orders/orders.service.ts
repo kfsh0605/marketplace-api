@@ -1,6 +1,5 @@
 import {
     BadRequestException,
-    ForbiddenException,
     Injectable,
     NotFoundException,
     Optional,
@@ -88,7 +87,7 @@ export class OrdersService {
             return;
         }
         if ((await this.roleOf(actorId)) !== 'admin') {
-            throw new ForbiddenException('Це замовлення належить іншому користувачу');
+            throw new NotFoundException(`Order ${orderId} not found`);
         }
     }
 
