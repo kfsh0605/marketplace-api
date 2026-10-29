@@ -71,6 +71,31 @@ describe('Auth E2E: login, refresh, logout (Postgres і Redis через testcon
         await http().post('/auth/login').send({ email: EMAIL, password: PASSWORD, role: 'admin' }).expect(400);
     });
 
+    it('login: 11-та спроба для того ж email з того ж IP -> 429 + Retry-After, навіть із правильним паролем', async () => {
+        const victim = 'brute.target@example.com';
+        const users = e2e.dataSource.getRepository(User);
+        await users.save(
+            users.create({
+                email: victim,
+                name: 'Victim',
+                role: 'customer',
+                passwordHash: await hashPassword(PASSWORD),
+            }),
+        );
+
+        for (let attempt = 1; attempt <= 10; attempt += 1) {
+            await http().post('/auth/login').send({ email: victim, password: `wrong-${attempt}` }).expect(401);
+        }
+
+        const blocked = await http().post('/auth/login').send({ email: victim, password: PASSWORD }).expect(429);
+        const other = await http().post('/auth/login').send({ email: EMAIL, password: PASSWORD }).expect(200);
+
+        expect(blocked.headers['content-type']).toContain('application/problem+json');
+        expect(blocked.body.title).toBe('Too Many Requests');
+        expect(Number(blocked.headers['retry-after'])).toBeGreaterThan(0);
+        expect(other.body.accessToken).toEqual(expect.any(String));
+    });
+
     it('захищений маршрут без токена, зі сміттям і зі схемою Basic -> 401 + WWW-Authenticate', async () => {
         const none = await http().post('/auth/logout').expect(401);
         await http().post('/auth/logout').set('Authorization', 'Bearer not.a.jwt').expect(401);

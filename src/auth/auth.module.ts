@@ -13,6 +13,9 @@ import { KeyStore } from './key-store';
 import { RefreshTokenService } from './refresh-token.service';
 import { RolesGuard } from './roles.guard';
 import { TokenService } from './token.service';
+import { SlidingWindowLimiter } from '../ratelimit/sliding-window-limiter';
+import { LOGIN_ATTEMPT_LIMIT, LOGIN_ATTEMPT_WINDOW_MS } from './auth.constants';
+import { LoginThrottle } from './login-throttle';
 
 @Injectable()
 class AuthRedisShutdown implements OnApplicationShutdown {
@@ -32,6 +35,19 @@ class AuthRedisShutdown implements OnApplicationShutdown {
             provide: AccessDenylist,
             inject: [AUTH_REDIS],
             useFactory: (redis: Redis): AccessDenylist => new AccessDenylist(redis),
+        },
+        {
+            provide: LoginThrottle,
+            inject: [AUTH_REDIS],
+            useFactory: (redis: Redis): LoginThrottle =>
+                new LoginThrottle(
+                    new SlidingWindowLimiter(redis, {
+                        limit: LOGIN_ATTEMPT_LIMIT,
+                        windowMs: LOGIN_ATTEMPT_WINDOW_MS,
+                        prefix: 'rl:login',
+                        failOpen: false,
+                    }),
+                ),
         },
         KeyStore,
         TokenService,
