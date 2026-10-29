@@ -181,8 +181,8 @@ paths:
                 $ref: '#/components/schemas/Order'
         '401':
           description: Немає або недійсний access-токен
-        '403':
-          description: Замовлення належить іншому користувачу
+        '404':
+          description: Замовлення не існує або належить іншому користувачу
       security:
         - bearer: []
       summary: Отримати замовлення за id
@@ -238,23 +238,13 @@ paths:
       responses:
         '401':
           description: Немає або недійсний access-токен
-        '403':
-          description: Замовлення належить іншому користувачу
+        '404':
+          description: Замовлення не існує або належить іншому користувачу
       security:
         - bearer: []
       summary: SSE-потік подій зміни статусу замовлення
       tags:
         - orders
-  /health:
-    get:
-      operationId: getHealth
-      parameters: []
-      responses:
-        '503':
-          description: Базу даних недоступна
-      summary: Перевірка стану застосунку та підключення до БД
-      tags:
-        - health
   /auth/login:
     post:
       operationId: login
@@ -273,7 +263,14 @@ paths:
               schema:
                 $ref: '#/components/schemas/TokenPairDto'
         '401':
-          description: Невірний email або пароль
+          description: |-
+            Невірний email або пароль
+
+            Невірний email або пароль
+        '429':
+          description: Забагато спроб входу з цього IP для цього email; див. Retry-After
+        '503':
+          description: 'Не вдалося перевірити ліміт спроб: повторіть пізніше'
       summary: Увійти за email і паролем
       tags:
         - auth
@@ -317,6 +314,16 @@ paths:
       summary: 'Вийти: відкликати refresh-сім''ю й access-токен'
       tags:
         - auth
+  /health:
+    get:
+      operationId: getHealth
+      parameters: []
+      responses:
+        '503':
+          description: Базу даних недоступна
+      summary: Перевірка стану застосунку та підключення до БД
+      tags:
+        - health
 info:
   title: Marketplace API
   description: 'API для навчального курсового проєкту: товари та замовлення'
