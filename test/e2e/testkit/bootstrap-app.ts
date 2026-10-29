@@ -10,6 +10,8 @@ import { Product } from '../../../src/entities/product.entity';
 import { Order } from '../../../src/entities/order.entity';
 import { OrderItem } from '../../../src/entities/order-item.entity';
 import { GenericContainer, Wait } from 'testcontainers';
+import type { Redis } from 'ioredis';
+import { AUTH_REDIS } from '../../../src/redis/tokens';
 import { PostProcessingJob } from '../../../src/entities/post-processing-job.entity';
 import { Init1788985076642 } from '../../../src/migrations/1788985076642-Init';
 import { AddProductsNameUnique1789030528991 } from '../../../src/migrations/1789030528991-AddProductsNameUnique';
@@ -36,6 +38,7 @@ export interface E2eApp {
     container: StartedPostgreSqlContainer;
     dataSource: DataSource;
     close(): Promise<void>;
+    clearLoginThrottle(): Promise<void>;
 }
 
 export async function bootstrapE2eApp(): Promise<E2eApp> {
@@ -83,6 +86,13 @@ export async function bootstrapE2eApp(): Promise<E2eApp> {
         app,
         container,
         dataSource: migrationDataSource,
+        async clearLoginThrottle() {
+            const redis = app.get<Redis>(AUTH_REDIS, { strict: false });
+            const keys = await redis.keys('rl:login:*');
+            if (keys.length > 0) {
+                await redis.del(...keys);
+            }
+        },
         async close() {
             await app.close();
             await migrationDataSource.destroy();

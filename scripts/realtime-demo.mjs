@@ -1,18 +1,32 @@
 import { io } from 'socket.io-client';
 
 const BASE_URL = process.env.DEMO_BASE_URL ?? 'http://localhost:3000';
+const EMAIL = process.env.DEMO_EMAIL ?? 'olena.kravchenko@example.com';
+const PASSWORD = process.env.DEMO_PASSWORD ?? 'marketplace-dev-password';
 const ORDER_A = Number(process.env.DEMO_ORDER_A ?? 1);
 const ORDER_B = Number(process.env.DEMO_ORDER_B ?? 7);
-const USER_ID = Number(process.env.DEMO_USER_ID ?? 1);
 const SAME_ROOM = process.argv.includes('--same-room');
 const TIMEOUT_MS = 3000;
 
 const roomBOrderId = SAME_ROOM ? ORDER_A : ORDER_B;
 const expectedBReceived = SAME_ROOM ? 1 : 0;
 
-function connectAndJoin(label, orderId) {
+async function login() {
+    const res = await fetch(`${BASE_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
+    });
+    if (!res.ok) {
+        throw new Error(`login failed: ${res.status} ${await res.text()}`);
+    }
+    const pair = await res.json();
+    return pair.accessToken;
+}
+
+function connectAndJoin(label, orderId, token) {
     return new Promise((resolve, reject) => {
-        const socket = io(BASE_URL, { forceNew: true });
+        const socket = io(BASE_URL, { forceNew: true, reconnection: false, auth: { token } });
 
         const timer = setTimeout(() => {
             socket.close();
@@ -25,7 +39,7 @@ function connectAndJoin(label, orderId) {
         });
 
         socket.on('connect', () => {
-            socket.emit('join', { orderId, userId: USER_ID }, (ack) => {
+            socket.emit('join', { orderId }, (ack) => {
                 clearTimeout(timer);
                 if (!ack?.joined) {
                     reject(new Error(`[${label}] join rejected: ${ack?.reason ?? 'unknown reason'}`));
@@ -47,10 +61,10 @@ function waitForStatusEvent(socket, timeoutMs) {
     });
 }
 
-async function changeStatus(orderId, status) {
+async function changeStatus(orderId, status, token) {
     const res = await fetch(`${BASE_URL}/orders/${orderId}/status`, {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
         body: JSON.stringify({ status }),
     });
     if (!res.ok) {
@@ -62,15 +76,14 @@ async function main() {
     console.error(`Режим: ${SAME_ROOM ? '--same-room (контрольний)' : 'основний'}`);
     console.error(`Клієнт A слухає orders:${ORDER_A}, клієнт B слухає orders:${roomBOrderId}`);
 
-    const clientA = await connectAndJoin('A', ORDER_A);
-    const clientB = await connectAndJoin('B', roomBOrderId);
+    const token = await login();
+    const clientA = await connectAndJoin('A', ORDER_A, token);
+    const clientB = await connectAndJoin('B', roomBOrderId, token);
 
-    // Обидва listener'и реєструємо ДО зміни статусу — інакше подія могла б
-    // вилетіти раніше, ніж ми почали її чекати.
     const aReceivedPromise = waitForStatusEvent(clientA, TIMEOUT_MS);
     const bReceivedPromise = waitForStatusEvent(clientB, TIMEOUT_MS);
 
-    await changeStatus(ORDER_A, 'packed');
+    await changeStatus(ORDER_A, 'packed', token);
 
     const [aReceived, bReceived] = await Promise.all([aReceivedPromise, bReceivedPromise]);
 

@@ -91,6 +91,18 @@ export class OrdersService {
         }
     }
 
+    async canView(orderId: number, actorId: number): Promise<boolean> {
+        try {
+            await this.assertCanView(String(orderId), actorId);
+            return true;
+        } catch (error) {
+            if (error instanceof NotFoundException) {
+                return false;
+            }
+            throw error;
+        }
+    }
+
     private async roleOf(userId: number): Promise<UserRole | null> {
         const user = await this.orderRepo.manager.findOne(UserEntity, {
             where: { id: userId },
@@ -232,14 +244,6 @@ export class OrdersService {
         this.orderEventsService.emitStatusChanged(id, status);
 
         return this.findOne(orderId);
-    }
-
-    async isOrderOwnedByUser(orderId: number, userId: number): Promise<boolean> {
-        const rows: unknown[] = await this.orderRepo.query(
-            `SELECT 1 FROM orders WHERE id = $1 AND "userId" = $2`,
-            [orderId, userId],
-        );
-        return rows.length > 0;
     }
 
     private toResponse(entity: OrderEntity): Order {

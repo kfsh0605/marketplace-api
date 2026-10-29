@@ -24,6 +24,7 @@ describe('Orders E2E (повний Nest-застосунок, Postgres чере�
         await e2e.dataSource.query(
             'TRUNCATE TABLE idempotency_keys, outbox, post_processing_jobs, order_items, orders, products, users RESTART IDENTITY CASCADE',
         );
+        await e2e.clearLoginThrottle();
     });
 
     it('POST /orders -> 201, GET /orders/:id -> 200 з тим самим тілом', async () => {

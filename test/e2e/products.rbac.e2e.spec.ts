@@ -32,6 +32,7 @@ describe('Products E2E: публічні маршрути й RBAC на запи�
 
     afterEach(async () => {
         await e2e.dataSource.query('TRUNCATE TABLE products, users RESTART IDENTITY CASCADE');
+        await e2e.clearLoginThrottle();
     });
 
     it('публічні маршрути відкриті без токена: GET /health, GET /products', async () => {

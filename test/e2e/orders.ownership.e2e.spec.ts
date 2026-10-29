@@ -61,6 +61,7 @@ describe('Orders E2E: владіння замовленням (404 на чужи
         await e2e.dataSource.query(
             'TRUNCATE TABLE refresh_tokens, idempotency_keys, outbox, post_processing_jobs, order_items, orders, products, users RESTART IDENTITY CASCADE',
         );
+        await e2e.clearLoginThrottle();
     });
 
     it('POST /orders прив\'язує замовлення до користувача з токена, а не з тіла запиту', async () => {
