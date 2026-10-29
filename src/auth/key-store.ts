@@ -17,6 +17,16 @@ export class KeyStore {
         const publicKey = loadEs256PublicKey(config.get('JWT_PUBLIC_KEY', { infer: true }));
         this.verificationKeys.set(this.kid, publicKey);
         this.logger.log(`ключ підпису: kid=${this.kid} fp=${publicKeyFingerprint(publicKey)}`);
+
+        const previousKid = config.get('JWT_PREVIOUS_KID', { infer: true });
+        const previousPublic = config.get('JWT_PREVIOUS_PUBLIC_KEY', { infer: true });
+        if (previousKid && previousPublic) {
+            const previousKey = loadEs256PublicKey(previousPublic);
+            this.verificationKeys.set(previousKid, previousKey);
+            this.logger.log(
+                `попередній ключ (лише перевірка): kid=${previousKid} fp=${publicKeyFingerprint(previousKey)}`,
+            );
+        }
     }
 
     verificationKey(kid: string | undefined): KeyObject {

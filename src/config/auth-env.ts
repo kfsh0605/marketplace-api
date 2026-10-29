@@ -28,5 +28,26 @@ export function validateAuthEnv(env: Env): Env {
         return fail('JWT_PUBLIC_KEY', 'не відповідає JWT_PRIVATE_KEY (різні пари ключів)');
     }
 
+    const previousKid = env.JWT_PREVIOUS_KID;
+    const previousPublicKey = env.JWT_PREVIOUS_PUBLIC_KEY;
+
+    if (Boolean(previousKid) !== Boolean(previousPublicKey)) {
+        return fail(
+            previousKid ? 'JWT_PREVIOUS_PUBLIC_KEY' : 'JWT_PREVIOUS_KID',
+            'потрібні обидві змінні попереднього ключа разом (або жодної)',
+        );
+    }
+
+    if (previousKid && previousPublicKey) {
+        if (previousKid === env.JWT_KID) {
+            return fail('JWT_PREVIOUS_KID', 'збігається з JWT_KID: поточний і попередній ключі мають різні kid');
+        }
+        try {
+            loadEs256PublicKey(previousPublicKey);
+        } catch {
+            return fail('JWT_PREVIOUS_PUBLIC_KEY', BAD_KEY);
+        }
+    }
+
     return env;
 }

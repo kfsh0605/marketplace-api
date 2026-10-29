@@ -2,6 +2,11 @@ import { z } from 'zod';
 
 const FROM_VAULT = 'не задана: секрет має приїхати зі сховища (bash scripts/with-secrets.sh dev <команда>)';
 const vaultString = () => z.string(FROM_VAULT).min(1, FROM_VAULT);
+const optionalVault = () =>
+    z
+        .string()
+        .transform((value) => (value.trim() === '' ? undefined : value))
+        .optional();
 
 export const envSchema = z.object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -23,6 +28,8 @@ export const envSchema = z.object({
     JWT_PRIVATE_KEY: vaultString(),
     JWT_PUBLIC_KEY: vaultString(),
     REFRESH_TOKEN_PEPPER: vaultString().min(32, 'коротший за 32 символи: потрібен випадковий рядок від 32 байтів'),
+    JWT_PREVIOUS_KID: optionalVault(),
+    JWT_PREVIOUS_PUBLIC_KEY: optionalVault(),
 });
 export type Env = z.infer<typeof envSchema>;
 

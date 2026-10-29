@@ -54,6 +54,10 @@ if [ -f "$JWT_DIR/private.pem" ] && [ -f "$JWT_DIR/public.pem" ] && [ -f "$JWT_D
 else
   echo "with-secrets.sh: немає ключів у $JWT_DIR, JWT_* не експортовано. Згенеруй: node scripts/gen-jwt-keys.mjs $ENV_SLUG" >&2
 fi
+if [ -f "$JWT_DIR/previous_public.pem" ] && [ -f "$JWT_DIR/previous_kid" ]; then
+  export JWT_PREVIOUS_KID="$(tr -d '\r\n' < "$JWT_DIR/previous_kid")"
+  export JWT_PREVIOUS_PUBLIC_KEY="$(node -e 'process.stdout.write(require("fs").readFileSync(process.argv[1]).toString("base64"))' "$JWT_DIR/previous_public.pem")"
+fi
 export REDIS_URL="${REDIS_URL:-redis://${REDIS_HOST:-127.0.0.1}:${REDIS_PORT:-6390}}"
 export REDIS_QUEUE_URL="${REDIS_QUEUE_URL:-redis://${REDIS_HOST:-127.0.0.1}:${REDIS_QUEUE_PORT:-6380}}"
 
