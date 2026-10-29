@@ -1,9 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { MoreThan, Repository } from 'typeorm';
+import { MoreThan, QueryFailedError, Repository } from 'typeorm';
 import { Product as ProductEntity } from '../entities/product.entity';
 import { decodeCursor, encodeCursor, PaginatedResult } from '../common/pagination';
+import { CreateProductDto } from './dto/create-product.dto';
 import { Product } from './product';
+
+const UNIQUE_VIOLATION = '23505';
 
 @Injectable()
 export class ProductsService {
@@ -37,6 +40,25 @@ export class ProductsService {
             throw new NotFoundException(`Product ${productId} not found`);
         }
         return this.toResponse(entity);
+    }
+
+    async create(dto: CreateProductDto): Promise<Product> {
+        try {
+            const saved = await this.repo.save(
+                this.repo.create({
+                    name: dto.name,
+                    priceCents: dto.priceCents,
+                    stock: dto.stock,
+                    currency: dto.currency ?? 'UAH',
+                }),
+            );
+            return this.toResponse(saved);
+        } catch (error) {
+            if (error instanceof QueryFailedError && (error.driverError as { code?: string }).code === UNIQUE_VIOLATION) {
+                throw new ConflictException(`Товар з назвою "${dto.name}" вже існує`);
+            }
+            throw error;
+        }
     }
 
     private toResponse(entity: ProductEntity): Product {

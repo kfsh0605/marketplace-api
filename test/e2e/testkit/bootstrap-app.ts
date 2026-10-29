@@ -4,10 +4,14 @@ import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers
 import { DataSource } from 'typeorm';
 import type { AppModule as AppModuleType } from '../../../src/app.module';
 import { configureApp } from '../../../src/configure-app';
+import { generateKeyPairSync } from 'node:crypto'
 import { User } from '../../../src/entities/user.entity';
 import { Product } from '../../../src/entities/product.entity';
 import { Order } from '../../../src/entities/order.entity';
 import { OrderItem } from '../../../src/entities/order-item.entity';
+import { GenericContainer, Wait } from 'testcontainers';
+import type { Redis } from 'ioredis';
+import { AUTH_REDIS } from '../../../src/redis/tokens';
 import { PostProcessingJob } from '../../../src/entities/post-processing-job.entity';
 import { Init1788985076642 } from '../../../src/migrations/1788985076642-Init';
 import { AddProductsNameUnique1789030528991 } from '../../../src/migrations/1789030528991-AddProductsNameUnique';
@@ -15,17 +19,35 @@ import { OrdersOrderItemsIndexes1789420020545 } from '../../../src/migrations/17
 import { CheckoutSchema1789593338925 } from '../../../src/migrations/1789593338925-CheckoutSchema';
 import { OutboxAndProcessedMessages1791300000000 } from '../../../src/migrations/1791300000000-OutboxAndProcessedMessages';
 import { IdempotencyKeys1791400000000 } from '../../../src/migrations/1791400000000-IdempotencyKeys';
+import { AuthTables1793000000000 } from '../../../src/migrations/1793000000000-AuthTables';
+
+function setAuthEnv(): void {
+    const { privateKey, publicKey } = generateKeyPairSync('ec', {
+        namedCurve: 'P-256',
+        privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+        publicKeyEncoding: { type: 'spki', format: 'pem' },
+    });
+    process.env.JWT_KID = 'e2e';
+    process.env.JWT_PRIVATE_KEY = Buffer.from(privateKey).toString('base64');
+    process.env.JWT_PUBLIC_KEY = Buffer.from(publicKey).toString('base64');
+    process.env.REFRESH_TOKEN_PEPPER = 'e2e-pepper-'.repeat(4);
+}
 
 export interface E2eApp {
     app: INestApplication;
     container: StartedPostgreSqlContainer;
     dataSource: DataSource;
     close(): Promise<void>;
+    clearLoginThrottle(): Promise<void>;
 }
 
 export async function bootstrapE2eApp(): Promise<E2eApp> {
     const container = await new PostgreSqlContainer('postgres:16-alpine').start();
     const uri = container.getConnectionUri();
+    const redisContainer = await new GenericContainer('redis:8.4-alpine')
+        .withExposedPorts(6379)
+        .withWaitStrategy(Wait.forLogMessage(/Ready to accept connections/))
+        .start();
 
     const migrationDataSource = new DataSource({
         type: 'postgres',
@@ -37,7 +59,8 @@ export async function bootstrapE2eApp(): Promise<E2eApp> {
             OrdersOrderItemsIndexes1789420020545,
             CheckoutSchema1789593338925,
             OutboxAndProcessedMessages1791300000000,
-            IdempotencyKeys1791400000000
+            IdempotencyKeys1791400000000,
+            AuthTables1793000000000,
         ],
         synchronize: false,
     });
@@ -50,6 +73,8 @@ export async function bootstrapE2eApp(): Promise<E2eApp> {
     process.env.DB_NAME = 'e2e-placeholder';
     process.env.RABBITMQ_DISABLED = '1';
     process.env.REDIS_DISABLED = '1';
+    process.env.REDIS_QUEUE_URL = `redis://${redisContainer.getHost()}:${redisContainer.getMappedPort(6379)}`;
+    setAuthEnv();
     const { AppModule } = require('../../../src/app.module') as { AppModule: typeof AppModuleType };
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -61,16 +86,29 @@ export async function bootstrapE2eApp(): Promise<E2eApp> {
         app,
         container,
         dataSource: migrationDataSource,
+        async clearLoginThrottle() {
+            const redis = app.get<Redis>(AUTH_REDIS, { strict: false });
+            const keys = await redis.keys('rl:login:*');
+            if (keys.length > 0) {
+                await redis.del(...keys);
+            }
+        },
         async close() {
             await app.close();
             await migrationDataSource.destroy();
             await container.stop();
+            await redisContainer.stop();
             delete process.env.DATABASE_URL;
             delete process.env.DB_HOST;
             delete process.env.DB_USER;
             delete process.env.DB_NAME;
             delete process.env.RABBITMQ_DISABLED;
             delete process.env.REDIS_DISABLED;
+            delete process.env.JWT_KID;
+            delete process.env.JWT_PRIVATE_KEY;
+            delete process.env.JWT_PUBLIC_KEY;
+            delete process.env.REFRESH_TOKEN_PEPPER;
+            delete process.env.REDIS_QUEUE_URL;
         },
     };
 }

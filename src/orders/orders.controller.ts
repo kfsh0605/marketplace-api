@@ -1,4 +1,17 @@
-import { BadRequestException, Body, Controller, Get, Headers, HttpCode, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';import { ApiCreatedResponse, ApiHeader, ApiOkResponse, ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { BadRequestException, Body, Controller, Get, Headers, HttpCode, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import {
+    ApiBearerAuth,
+    ApiCreatedResponse,
+    ApiForbiddenResponse,
+    ApiHeader,
+    ApiNotFoundResponse,
+    ApiOkResponse,
+    ApiOperation,
+    ApiParam,
+    ApiQuery,
+    ApiTags,
+    ApiUnauthorizedResponse,
+} from '@nestjs/swagger';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { RateLimitGuard } from '../ratelimit/rate-limit.guard';
 import { OrdersService } from './orders.service';
@@ -7,8 +20,13 @@ import { OrderListResponse } from './order-list-response';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import type { Request, Response } from 'express';
 import { OrderEventsService, OrderStatusEvent } from './order-events.service';
+import { CurrentUser } from '../auth/current-user.decorator';
+import { Roles } from '../auth/roles.decorator';
+import type { AccessPrincipal } from '../auth/token.service';
 
 @ApiTags('orders')
+@ApiBearerAuth()
+@ApiUnauthorizedResponse({ description: 'Немає або недійсний access-токен' })
 @Controller('orders')
 export class OrdersController {
     constructor(
@@ -21,17 +39,22 @@ export class OrdersController {
     @ApiQuery({ name: 'limit', required: false, type: Number })
     @ApiQuery({ name: 'cursor', required: false, type: String })
     @ApiOkResponse({ type: OrderListResponse })
-    findAll(@Query('limit') limit?: string, @Query('cursor') cursor?: string) {
+    findAll(
+        @CurrentUser() user: AccessPrincipal,
+        @Query('limit') limit?: string,
+        @Query('cursor') cursor?: string,
+    ) {
         const parsedLimit = limit ? parseInt(limit, 10) : 20;
-        return this.ordersService.findAll(parsedLimit, cursor);
+        return this.ordersService.findAll(parsedLimit, cursor, user.userId);
     }
 
     @Get(':orderId')
     @ApiOperation({ operationId: 'getOrder', summary: 'Отримати замовлення за id' })
     @ApiParam({ name: 'orderId', example: 'o-1' })
     @ApiOkResponse({ type: Order })
-    findOne(@Param('orderId') orderId: string) {
-        return this.ordersService.findOne(orderId);
+    @ApiNotFoundResponse({ description: 'Замовлення не існує або належить іншому користувачу' })
+    findOne(@Param('orderId') orderId: string, @CurrentUser() user: AccessPrincipal) {
+        return this.ordersService.findOneFor(orderId, user.userId);
     }
 
     @Post()
@@ -48,18 +71,21 @@ export class OrdersController {
     async create(
         @Body() dto: CreateOrderDto,
         @Headers('idempotency-key') idempotencyKey: string | undefined,
+        @CurrentUser() user: AccessPrincipal,
         @Res({ passthrough: true }) res: Response,
     ) {
         if (typeof idempotencyKey !== 'string' || idempotencyKey.length === 0) {
             throw new BadRequestException('Idempotency-Key header is required');
         }
-        const { order, replayed } = await this.ordersService.createIdempotent(dto, idempotencyKey);
+        const { order, replayed } = await this.ordersService.createIdempotent(dto, idempotencyKey, user.userId);
         if (replayed) {
             res.setHeader('Idempotency-Replay', 'true');
         }
         return order;
     }
     @Patch(':orderId/status')
+    @Roles('seller', 'admin')
+    @ApiForbiddenResponse({ description: 'Змінювати статус можуть лише seller або admin' })
     @ApiOperation({ operationId: 'updateOrderStatus', summary: 'Змінити статус замовлення' })
     @ApiParam({ name: 'orderId', example: 'o-1' })
     @ApiOkResponse({ type: Order })
@@ -69,12 +95,15 @@ export class OrdersController {
     @Get(':orderId/events')
     @ApiOperation({ operationId: 'streamOrderEvents', summary: 'SSE-потік подій зміни статусу замовлення' })
     @ApiParam({ name: 'orderId', example: 'o-1' })
-    streamEvents(
+    @ApiNotFoundResponse({ description: 'Замовлення не існує або належить іншому користувачу' })
+    async streamEvents(
         @Param('orderId') orderId: string,
         @Headers('last-event-id') lastEventIdHeader: string | undefined,
+        @CurrentUser() user: AccessPrincipal,
         @Req() req: Request,
         @Res() res: Response,
-    ): void {
+    ): Promise<void> {
+        await this.ordersService.assertCanView(orderId, user.userId);
         const id = Number(orderId);
 
         res.writeHead(200, {

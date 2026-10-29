@@ -1,9 +1,11 @@
 import { Controller, Get, Inject, ServiceUnavailableException } from '@nestjs/common';
 import { ApiOperation, ApiServiceUnavailableResponse, ApiTags } from '@nestjs/swagger';
+import { Public } from '../auth/public.decorator';
 import { Pool } from 'pg';
 import { PG_POOL } from '../database/database.module';
 
 @ApiTags('health')
+@Public()
 @Controller('health')
 export class HealthController {
     constructor(@Inject(PG_POOL) private readonly pool: Pool) {}

@@ -20,6 +20,14 @@ module.exports = {
     testTimeout: 60000,
     projects: [
         {
+            displayName: 'unit',
+            testEnvironment: 'node',
+            rootDir: '.',
+            testMatch: ['<rootDir>/test/unit/**/*.spec.ts'],
+            setupFiles: ['reflect-metadata'],
+            transform: plainTsTransform,
+        },
+        {
             displayName: 'integration',
             testEnvironment: 'node',
             rootDir: '.',

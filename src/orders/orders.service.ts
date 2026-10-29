@@ -1,5 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException, Optional, UnprocessableEntityException } from '@nestjs/common';
-import { createHash } from 'crypto';
+import {
+    BadRequestException,
+    Injectable,
+    NotFoundException,
+    Optional,
+    UnprocessableEntityException,
+} from '@nestjs/common';import { createHash } from 'crypto';
 import { ProductCardService } from '../products/product-card.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { enqueueOrderPlaced } from '../outbox/outbox';
@@ -7,10 +12,15 @@ import { EntityManager, MoreThan, Repository } from 'typeorm';
 import { Order as OrderEntity } from '../entities/order.entity';
 import { OrderItem as OrderItemEntity } from '../entities/order-item.entity';
 import { Product as ProductEntity } from '../entities/product.entity';
+import { User as UserEntity } from '../entities/user.entity';
+import type { UserRole } from '../auth/roles';
 import { decodeCursor, encodeCursor, PaginatedResult } from '../common/pagination';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { Order } from './order';
 import { OrderEventsService } from './order-events.service';
+import { CurrentUser } from '../auth/current-user.decorator';
+import { Roles } from '../auth/roles.decorator';
+import type { AccessPrincipal } from '../auth/token.service';
 
 @Injectable()
 export class OrdersService {
@@ -21,12 +31,16 @@ export class OrdersService {
         @Optional() private readonly productCards?: ProductCardService,
     ) {}
 
-    async findAll(limit: number, cursor?: string): Promise<PaginatedResult<Order>> {
+    async findAll(limit: number, cursor: string | undefined, actorId: number): Promise<PaginatedResult<Order>> {
         const decoded = cursor ? decodeCursor(cursor) : null;
         const afterId = decoded ? Number(decoded.id) : 0;
+        const seesAll = (await this.roleOf(actorId)) === 'admin';
 
         const rows = await this.orderRepo.find({
-            where: afterId ? { id: MoreThan(afterId) } : {},
+            where: {
+                ...(afterId ? { id: MoreThan(afterId) } : {}),
+                ...(seesAll ? {} : { user: { id: actorId } }),
+            },
             order: { id: 'ASC' },
             take: limit + 1,
             relations: ['items', 'items.product'],
@@ -51,21 +65,66 @@ export class OrdersService {
         return this.toResponse(entity);
     }
 
-    async create(dto: CreateOrderDto): Promise<Order> {
-        const saved = await this.orderRepo.manager.transaction((manager) => this.insertOrderWithEvent(manager, dto));
+    async findOneFor(orderId: string, actorId: number): Promise<Order> {
+        await this.assertCanView(orderId, actorId);
+        return this.findOne(orderId);
+    }
+
+    async assertCanView(orderId: string, actorId: number): Promise<void> {
+        const id = Number(orderId);
+        if (!Number.isInteger(id)) {
+            throw new NotFoundException(`Order ${orderId} not found`);
+        }
+
+        const rows: Array<{ userId: number | null }> = await this.orderRepo.query(
+            `SELECT "userId" FROM orders WHERE id = $1`,
+            [id],
+        );
+        if (rows.length === 0) {
+            throw new NotFoundException(`Order ${orderId} not found`);
+        }
+        if (rows[0].userId === actorId) {
+            return;
+        }
+        if ((await this.roleOf(actorId)) !== 'admin') {
+            throw new NotFoundException(`Order ${orderId} not found`);
+        }
+    }
+
+    async canView(orderId: number, actorId: number): Promise<boolean> {
+        try {
+            await this.assertCanView(String(orderId), actorId);
+            return true;
+        } catch (error) {
+            if (error instanceof NotFoundException) {
+                return false;
+            }
+            throw error;
+        }
+    }
+
+    private async roleOf(userId: number): Promise<UserRole | null> {
+        const user = await this.orderRepo.manager.findOne(UserEntity, {
+            where: { id: userId },
+            select: { id: true, role: true },
+        });
+        return user?.role ?? null;
+    }
+
+    async create(dto: CreateOrderDto, userId?: number): Promise<Order> {
+        const saved = await this.orderRepo.manager.transaction((manager) =>
+            this.insertOrderWithEvent(manager, dto, userId),
+        );
         await this.invalidateCards(saved);
         return this.toResponse(saved);
     }
 
-    /**
-     * POST /orders с Idempotency-Key. Ключ ИДЕНТИФИЦИРУЕТ НАМЕРЕНИЕ клиента, а не тело запроса:
-     * два одинаковых, но осознанных заказа приходят с разными ключами и остаются двумя заказами.
-     * request_hash нужен лишь чтобы поймать ошибку клиента: тот же ключ с другим телом.
-     */
     async createIdempotent(
         dto: CreateOrderDto,
-        idempotencyKey: string,
+        clientKey: string,
+        userId?: number,
     ): Promise<{ order: Order; replayed: boolean }> {
+        const idempotencyKey = userId === undefined ? clientKey : `${userId}:${clientKey}`;
         const requestHash = createHash('sha256').update(JSON.stringify(dto ?? null)).digest('hex');
 
         const outcome = await this.orderRepo.manager.transaction(async (manager) => {
@@ -87,8 +146,7 @@ export class OrdersService {
                 return { kind: 'replay' as const, existing: rows[0] };
             }
 
-            // 2. Мы первые: бизнес-запись + событие в outbox + связь номерка с заказом, ОДИН COMMIT
-            const saved = await this.insertOrderWithEvent(manager, dto);
+            const saved = await this.insertOrderWithEvent(manager, dto, userId);
             await manager.query(`UPDATE idempotency_keys SET order_id = $1 WHERE idempotency_key = $2`, [
                 saved.id,
                 idempotencyKey,
@@ -107,8 +165,11 @@ export class OrdersService {
     }
 
     /** Бизнес-запись заказа и строка outbox: одна транзакция (manager приходит снаружи). */
-    private async insertOrderWithEvent(manager: EntityManager, dto: CreateOrderDto): Promise<OrderEntity> {
-        let totalCents = 0;
+    private async insertOrderWithEvent(
+        manager: EntityManager,
+        dto: CreateOrderDto,
+        userId?: number,
+    ): Promise<OrderEntity> {        let totalCents = 0;
         let currency = 'UAH';
         const items: OrderItemEntity[] = [];
 
@@ -133,6 +194,9 @@ export class OrdersService {
 
         const order = new OrderEntity();
         order.customerEmail = dto.customerEmail;
+        if (userId !== undefined) {
+            order.user = { id: userId } as UserEntity;
+        }
         order.status = 'created';
         order.totalCents = totalCents;
         order.currency = currency;
@@ -180,14 +244,6 @@ export class OrdersService {
         this.orderEventsService.emitStatusChanged(id, status);
 
         return this.findOne(orderId);
-    }
-
-    async isOrderOwnedByUser(orderId: number, userId: number): Promise<boolean> {
-        const rows: unknown[] = await this.orderRepo.query(
-            `SELECT 1 FROM orders WHERE id = $1 AND "userId" = $2`,
-            [orderId, userId],
-        );
-        return rows.length > 0;
     }
 
     private toResponse(entity: OrderEntity): Order {

@@ -45,7 +45,19 @@ if [ -z "${RABBITMQ_URL:-}" ]; then
   ENC_RMQ_PASSWORD="$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$RABBITMQ_PASSWORD")"
   export RABBITMQ_URL="amqp://${ENC_RMQ_USER}:${ENC_RMQ_PASSWORD}@${RABBITMQ_HOST:-localhost}:${RABBITMQ_PORT:-5672}"
 fi
-
+JWT_DIR="$ROOT/secrets/jwt/$ENV_SLUG"
+if [ -f "$JWT_DIR/private.pem" ] && [ -f "$JWT_DIR/public.pem" ] && [ -f "$JWT_DIR/kid" ] && [ -f "$JWT_DIR/refresh_pepper" ]; then
+  export JWT_KID="$(tr -d '\r\n' < "$JWT_DIR/kid")"
+  export JWT_PRIVATE_KEY="$(node -e 'process.stdout.write(require("fs").readFileSync(process.argv[1]).toString("base64"))' "$JWT_DIR/private.pem")"
+  export JWT_PUBLIC_KEY="$(node -e 'process.stdout.write(require("fs").readFileSync(process.argv[1]).toString("base64"))' "$JWT_DIR/public.pem")"
+  export REFRESH_TOKEN_PEPPER="$(tr -d '\r\n' < "$JWT_DIR/refresh_pepper")"
+else
+  echo "with-secrets.sh: немає ключів у $JWT_DIR, JWT_* не експортовано. Згенеруй: node scripts/gen-jwt-keys.mjs $ENV_SLUG" >&2
+fi
+if [ -f "$JWT_DIR/previous_public.pem" ] && [ -f "$JWT_DIR/previous_kid" ]; then
+  export JWT_PREVIOUS_KID="$(tr -d '\r\n' < "$JWT_DIR/previous_kid")"
+  export JWT_PREVIOUS_PUBLIC_KEY="$(node -e 'process.stdout.write(require("fs").readFileSync(process.argv[1]).toString("base64"))' "$JWT_DIR/previous_public.pem")"
+fi
 export REDIS_URL="${REDIS_URL:-redis://${REDIS_HOST:-127.0.0.1}:${REDIS_PORT:-6390}}"
 export REDIS_QUEUE_URL="${REDIS_QUEUE_URL:-redis://${REDIS_HOST:-127.0.0.1}:${REDIS_QUEUE_PORT:-6380}}"
 

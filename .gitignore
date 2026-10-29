@@ -157,3 +157,5 @@ test/**/*.js.map
 
 # Pact-контракти — перегенеровуються командою `npm run test:contract`
 pacts/
+
+secrets/jwt/
