@@ -9,6 +9,7 @@ import { Order } from '../entities/order.entity';
 import { OrderItem } from '../entities/order-item.entity';
 import { PostProcessingJob } from '../entities/post-processing-job.entity';
 import { resolvePgConnectionOptions } from './pg-connection-options';
+import { StoredFile } from '../entities/stored-file.entity';
 
 export const PG_POOL = 'PG_POOL';
 
@@ -24,7 +25,7 @@ export const PG_POOL = 'PG_POOL';
                 return {
                     type: 'postgres' as const,
                     ...options,
-                    entities: [User, Product, Order, OrderItem, PostProcessingJob],
+                    entities: [User, Product, Order, OrderItem, PostProcessingJob, StoredFile],
                     synchronize: false,
                 };
             },

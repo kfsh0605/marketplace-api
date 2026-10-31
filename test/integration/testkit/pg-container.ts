@@ -12,6 +12,8 @@ import { CheckoutSchema1789593338925 } from '../../../src/migrations/17895933389
 import { OutboxAndProcessedMessages1791300000000 } from '../../../src/migrations/1791300000000-OutboxAndProcessedMessages';
 import { IdempotencyKeys1791400000000 } from '../../../src/migrations/1791400000000-IdempotencyKeys';
 import { AuthTables1793000000000 } from '../../../src/migrations/1793000000000-AuthTables';
+import { StoredFile } from '../../../src/entities/stored-file.entity';
+import { FilesTable1794000000000 } from '../../../src/migrations/1794000000000-FilesTable';
 
 export interface PgHandle {
     container: StartedPostgreSqlContainer;
@@ -28,7 +30,7 @@ export async function startPg(label = ''): Promise<PgHandle> {
     const dataSource = new DataSource({
         type: 'postgres',
         url: container.getConnectionUri(),
-        entities: [User, Product, Order, OrderItem, PostProcessingJob],
+        entities: [User, Product, Order, OrderItem, PostProcessingJob, StoredFile],
         migrations: [
             Init1788985076642,
             AddProductsNameUnique1789030528991,
@@ -37,6 +39,7 @@ export async function startPg(label = ''): Promise<PgHandle> {
             OutboxAndProcessedMessages1791300000000,
             IdempotencyKeys1791400000000,
             AuthTables1793000000000,
+            FilesTable1794000000000
         ],
         synchronize: false,
     });

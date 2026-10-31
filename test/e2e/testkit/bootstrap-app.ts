@@ -20,6 +20,7 @@ import { CheckoutSchema1789593338925 } from '../../../src/migrations/17895933389
 import { OutboxAndProcessedMessages1791300000000 } from '../../../src/migrations/1791300000000-OutboxAndProcessedMessages';
 import { IdempotencyKeys1791400000000 } from '../../../src/migrations/1791400000000-IdempotencyKeys';
 import { AuthTables1793000000000 } from '../../../src/migrations/1793000000000-AuthTables';
+import { FilesTable1794000000000 } from '../../../src/migrations/1794000000000-FilesTable';
 
 function setAuthEnv(): void {
     const { privateKey, publicKey } = generateKeyPairSync('ec', {
@@ -69,6 +70,7 @@ export async function bootstrapE2eApp(): Promise<E2eApp> {
             OutboxAndProcessedMessages1791300000000,
             IdempotencyKeys1791400000000,
             AuthTables1793000000000,
+            FilesTable1794000000000
         ],
         synchronize: false,
     });
