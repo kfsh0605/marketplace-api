@@ -11,12 +11,18 @@ async function insertUser(dataSource: DataSource, email: string): Promise<number
     return rows[0].id;
 }
 
-function insertFile(dataSource: DataSource, ownerId: number, key: string, extra = ''): Promise<unknown> {
-    return dataSource.query(
-        `INSERT INTO "files" ("key", "owner_id", "content_type"${extra ? ', ' + extra.split('=')[0] : ''})
-         VALUES ($1, $2, 'image/png'${extra ? ', ' + extra.split('=')[1] : ''})`,
-        [key, ownerId],
-    );
+function insertFile(
+    dataSource: DataSource,
+    ownerId: number,
+    key: string,
+    extra: Record<string, string> = {},
+): Promise<unknown> {
+    const columns = ['"key"', '"owner_id"', '"content_type"', ...Object.keys(extra).map((name) => `"${name}"`)];
+    const values = ['$1', '$2', `'image/png'`, ...Object.values(extra)];
+    return dataSource.query(`INSERT INTO "files" (${columns.join(', ')}) VALUES (${values.join(', ')})`, [
+        key,
+        ownerId,
+    ]);
 }
 
 describe('Таблиця files: обмеження цілісності (Postgres, testcontainers)', () => {
@@ -58,23 +64,23 @@ describe('Таблиця files: обмеження цілісності (Postgre
     it('невідомий статус відхиляється', async () => {
         const owner = await insertUser(dataSource, 'a@example.com');
 
-        await expect(insertFile(dataSource, owner, 'uploads/1/a.png', `"status"='DONE'`)).rejects.toThrow(
-            /CHK_files_status/,
-        );
+        await expect(
+            insertFile(dataSource, owner, 'uploads/1/a.png', { status: `'DONE'`, completed_at: 'now()' }),
+        ).rejects.toThrow(/CHK_files_status/);
     });
 
     it('COMPLETED без completed_at відхиляється', async () => {
         const owner = await insertUser(dataSource, 'a@example.com');
 
-        await expect(insertFile(dataSource, owner, 'uploads/1/a.png', `"status"='COMPLETED'`)).rejects.toThrow(
-            /CHK_files_completed/,
-        );
+        await expect(
+            insertFile(dataSource, owner, 'uploads/1/a.png', { status: `'COMPLETED'` }),
+        ).rejects.toThrow(/CHK_files_completed/);
     });
 
     it('від\'ємний розмір відхиляється', async () => {
         const owner = await insertUser(dataSource, 'a@example.com');
 
-        await expect(insertFile(dataSource, owner, 'uploads/1/a.png', `"size"=-1`)).rejects.toThrow(
+        await expect(insertFile(dataSource, owner, 'uploads/1/a.png', { size: '-1' })).rejects.toThrow(
             /CHK_files_size/,
         );
     });
@@ -82,7 +88,7 @@ describe('Таблиця files: обмеження цілісності (Postgre
     it('розмір понад 2 ГіБ зберігається і читається числом', async () => {
         const owner = await insertUser(dataSource, 'a@example.com');
         const fiveGiB = 5 * 1024 * 1024 * 1024;
-        await insertFile(dataSource, owner, 'uploads/1/big.bin', `"size"=${fiveGiB}`);
+        await insertFile(dataSource, owner, 'uploads/1/big.bin', { size: String(fiveGiB) });
 
         const row = await dataSource.getRepository(StoredFile).findOneByOrFail({ key: 'uploads/1/big.bin' });
 
