@@ -33,6 +33,14 @@ function setAuthEnv(): void {
     process.env.REFRESH_TOKEN_PEPPER = 'e2e-pepper-'.repeat(4);
 }
 
+function setStorageEnv(): void {
+    process.env.STORAGE_ENDPOINT = 'http://127.0.0.1:1';
+    process.env.STORAGE_REGION = 'us-east-1';
+    process.env.STORAGE_BUCKET = 'e2e-files';
+    process.env.STORAGE_ACCESS_KEY = 'e2e-access-key';
+    process.env.STORAGE_SECRET_KEY = 'e2e-secret-key';
+}
+
 export interface E2eApp {
     app: INestApplication;
     container: StartedPostgreSqlContainer;
@@ -75,6 +83,7 @@ export async function bootstrapE2eApp(): Promise<E2eApp> {
     process.env.REDIS_DISABLED = '1';
     process.env.REDIS_QUEUE_URL = `redis://${redisContainer.getHost()}:${redisContainer.getMappedPort(6379)}`;
     setAuthEnv();
+    setStorageEnv();
     const { AppModule } = require('../../../src/app.module') as { AppModule: typeof AppModuleType };
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -109,6 +118,11 @@ export async function bootstrapE2eApp(): Promise<E2eApp> {
             delete process.env.JWT_PUBLIC_KEY;
             delete process.env.REFRESH_TOKEN_PEPPER;
             delete process.env.REDIS_QUEUE_URL;
+            delete process.env.STORAGE_ENDPOINT;
+            delete process.env.STORAGE_REGION;
+            delete process.env.STORAGE_BUCKET;
+            delete process.env.STORAGE_ACCESS_KEY;
+            delete process.env.STORAGE_SECRET_KEY;
         },
     };
 }
