@@ -14,9 +14,10 @@ import {
 import { CurrentUser } from '../auth/current-user.decorator';
 import type { AccessPrincipal } from '../auth/token.service';
 import { CommitUploadDto } from './dto/commit-upload.dto';
+import { RequestPartUrlsDto } from './dto/request-part-urls.dto';
 import { CreateUploadIntentDto } from './dto/create-upload-intent.dto';
 import { FilesService } from './files.service';
-import { FileResponse, UploadIntentResponse } from './files.responses';
+import { FileResponse, PartsResponse, PartUrlsResponse, UploadIntentResponse } from './files.responses';
 
 @ApiTags('files')
 @ApiBearerAuth()
@@ -53,16 +54,41 @@ export class FilesController {
         return this.filesService.commit(user.userId, dto.fileId);
     }
 
-    @Get('files/:id')
-    @Redirect()
-    @Header('Cache-Control', 'no-store')
+    @Get('uploads/:fileId/parts')
     @ApiOperation({
-        operationId: 'downloadFile',
-        summary: '302 на свіжий presigned GET URL (дійсний 60 секунд); гард спрацьовує на кожен запит',
+        operationId: 'listUploadedParts',
+        summary: 'Які частини multipart-завантаження вже лежать у сховищі (ListParts): за цим відновлюють після обриву',
     })
-    @ApiParam({ name: 'id', example: '3f2b8a52-6f0c-4c6b-9d6e-2a9f6c1b7e10' })
-    @ApiFoundResponse({ description: 'Редирект на короткоживучий presigned URL' })
-    @ApiNotFoundResponse({ description: 'Файл не існує, ще не завершений або належить іншому користувачу' })
+    @ApiParam({ name: 'fileId', example: '3f2b8a52-6f0c-4c6b-9d6e-2a9f6c1b7e10' })
+    @ApiOkResponse({ type: PartsResponse })
+    @ApiNotFoundResponse({ description: 'Файл не існує або належить іншому користувачу' })
+    @ApiConflictResponse({ description: 'Файл не очікує multipart-завантаження' })
+    listParts(
+        @Param('fileId', ParseUUIDPipe) fileId: string,
+        @CurrentUser() user: AccessPrincipal,
+    ): Promise<PartsResponse> {
+        return this.filesService.listUploadedParts(user.userId, fileId);
+    }
+
+    @Post('uploads/:fileId/parts/urls')
+    @HttpCode(200)
+    @ApiOperation({
+        operationId: 'presignUploadParts',
+        summary: 'Presigned PUT URL для вказаних частин (порціями, не більше 100 за запит)',
+    })
+    @ApiParam({ name: 'fileId', example: '3f2b8a52-6f0c-4c6b-9d6e-2a9f6c1b7e10' })
+    @ApiOkResponse({ type: PartUrlsResponse })
+    @ApiBadRequestResponse({ description: 'Номер частини поза діапазоном' })
+    @ApiNotFoundResponse({ description: 'Файл не існує або належить іншому користувачу' })
+    @ApiConflictResponse({ description: 'Файл не очікує multipart-завантаження' })
+    presignParts(
+        @Param('fileId', ParseUUIDPipe) fileId: string,
+        @Body() dto: RequestPartUrlsDto,
+        @CurrentUser() user: AccessPrincipal,
+    ): Promise<PartUrlsResponse> {
+        return this.filesService.presignParts(user.userId, fileId, dto.partNumbers);
+    }
+
     async download(
         @Param('id', ParseUUIDPipe) id: string,
         @CurrentUser() user: AccessPrincipal,

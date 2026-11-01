@@ -10,4 +10,4 @@ export type AllowedContentType = keyof typeof ALLOWED_CONTENT_TYPES;
 
 export const ALLOWED_CONTENT_TYPE_LIST: string[] = Object.keys(ALLOWED_CONTENT_TYPES);
 
-export const MAX_FILE_SIZE_BYTES = 5 * 1024 ** 3;
+export const MAX_FILE_SIZE_BYTES = 5 * 1024 ** 4;

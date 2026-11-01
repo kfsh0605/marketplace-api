@@ -1,2 +1,3 @@
 export const PRESIGN_PUT_TTL_SECONDS = 300;
 export const PRESIGN_GET_TTL_SECONDS = 60;
+export const PRESIGN_PART_TTL_SECONDS = 900;

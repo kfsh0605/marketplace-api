@@ -1,5 +1,9 @@
 import { StorageService } from '../../src/storage/storage.service';
-import { PRESIGN_GET_TTL_SECONDS, PRESIGN_PUT_TTL_SECONDS } from '../../src/storage/storage.constants';
+import {
+    PRESIGN_GET_TTL_SECONDS,
+    PRESIGN_PART_TTL_SECONDS,
+    PRESIGN_PUT_TTL_SECONDS,
+} from '../../src/storage/storage.constants';
 
 const config = {
     endpoint: 'http://127.0.0.1:22650',
@@ -48,5 +52,13 @@ describe('StorageService: presigned URL (офлайн, без мережі)', ()
 
         expect(byDefault.searchParams.get('X-Amz-Expires')).toBe(String(PRESIGN_GET_TTL_SECONDS));
         expect(custom.searchParams.get('X-Amz-Expires')).toBe('1');
+    });
+
+    it('URL частини multipart несе uploadId і partNumber, строк частини 15 хвилин', async () => {
+        const url = new URL(await storage.presignUploadPart('uploads/1/big.gz', 'upload-abc', 3));
+
+        expect(url.searchParams.get('uploadId')).toBe('upload-abc');
+        expect(url.searchParams.get('partNumber')).toBe('3');
+        expect(url.searchParams.get('X-Amz-Expires')).toBe(String(PRESIGN_PART_TTL_SECONDS));
     });
 });

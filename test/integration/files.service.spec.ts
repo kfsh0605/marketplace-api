@@ -2,28 +2,9 @@ import { BadRequestException, ConflictException, NotFoundException } from '@nest
 import { DataSource } from 'typeorm';
 import { StoredFile } from '../../src/entities/stored-file.entity';
 import { FilesService } from '../../src/files/files.service';
-import type { FileStorage } from '../../src/files/files.service';
 import { PgHandle, startPg } from './testkit/pg-container';
 import { resetDatabase } from './testkit/reset-database';
-
-class FakeStorage implements FileStorage {
-    readonly objects = new Map<string, number>();
-    readonly putRequests: Array<{ key: string; contentType: string; expiresIn?: number }> = [];
-
-    async presignPut(key: string, contentType: string, expiresIn?: number): Promise<string> {
-        this.putRequests.push({ key, contentType, expiresIn });
-        return `fake://put/${key}`;
-    }
-
-    async presignGet(key: string, expiresIn = 60): Promise<string> {
-        return `fake://get/${key}?expires=${expiresIn}`;
-    }
-
-    async head(key: string): Promise<{ size: number } | null> {
-        const size = this.objects.get(key);
-        return size === undefined ? null : { size };
-    }
-}
+import { FakeStorage } from './testkit/fake-storage';
 
 async function insertUser(dataSource: DataSource, email: string, role = 'customer'): Promise<number> {
     const rows = await dataSource.query(
