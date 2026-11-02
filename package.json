@@ -32,6 +32,7 @@
     "demo:ratelimit": "bash scripts/with-secrets.sh dev node dist/demo-ratelimit.js",
     "demo:queue": "bash scripts/with-secrets.sh dev node dist/demo-queue.js",
     "demo:upload": "bash scripts/with-secrets.sh dev node dist/demo-upload.js",
+    "demo:multipart": "bash scripts/with-secrets.sh dev node dist/demo-multipart.js",
     "rabbit:setup": "bash scripts/with-secrets.sh dev node dist/messaging/setup.js",
     "consumer": "bash scripts/with-secrets.sh dev node dist/messaging/run-consumer.js",
     "queue:worker": "bash scripts/with-secrets.sh dev node dist/queue/run-worker.js",
