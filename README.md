@@ -398,6 +398,10 @@ Provider verification (`test/contract/verify-provider.ts`) піднімає сп
     export BROKER_URL=amqp://marketplace:n4mPz9VuTxQaRy7bGhDsLk2E@127.0.0.1:5672
     export REDIS_URL=redis://127.0.0.1:6390
     export REDIS_QUEUE_URL=redis://127.0.0.1:6380
+    export STORAGE_ENDPOINT=http://127.0.0.1:22650
+    export STORAGE_ACCESS_KEY=hw26user
+    export STORAGE_SECRET_KEY=hw26secretpass
+    export STORAGE_BUCKET=hw26-files
     export SKIP_VAULT=1    # у грейдера немає доступу до сховища
     eval "$(node -e '
     const { generateKeyPairSync, randomBytes } = require("node:crypto");
@@ -451,6 +455,11 @@ Provider verification (`test/contract/verify-provider.ts`) піднімає сп
     npm run demo:reuse
     npm run demo:rbac
 
+    npm run demo:upload
+    npm run demo:multipart
+    npm run demo:multipart
+    npm run demo:cdn
+
     psql -h 127.0.0.1 -p 6432 -U marketplace -d marketplace -c "SELECT 1"
     psql -h 127.0.0.1 -p 6432 -U marketplace -d pgbouncer -c "SHOW POOLS"
 
@@ -469,6 +478,8 @@ Provider verification (`test/contract/verify-provider.ts`) піднімає сп
 **Redis (ДЗ №23).** Обидва Redis піднімає та сама `docker compose up -d --wait` (healthcheck `redis-cli ping`, тож після повернення команди вони готові). Порти: **6390** (кеш, `allkeys-lru`) і **6380** (черга й сесії, `noeviction` + AOF), обидва на `127.0.0.1` і поза діапазоном 22300–22399. Порт 6379 свідомо не зайнято: на машині розробника його часто тримає чужий Redis, і застосунок тихо працював би з ним. З `SKIP_VAULT=1` обгортка `with-secrets.sh` не виконується, тому `REDIS_URL` і `REDIS_QUEUE_URL` грейдер експортує сам (див. команди вище). Чотири нові демо (`demo:cache`, `demo:session`, `demo:ratelimit`, `demo:queue`) запускаються через `bash scripts/with-secrets.sh dev …`, друкують `key=number`, самі перевіряють інваріанти, завершуються кодом 0 і прибирають за собою свої ключі (BullMQ-демо працює у власному префіксі `bull-demo`). `demo:cache` і `demo:queue` читають `CONFIG GET maxmemory-policy` з живого з'єднання, тому підключення до не того інстансу (наприклад, обидва URL на кеш) дає `FAIL`, а не фальшиву «зелень». Нових env-файлів немає, у dev-Redis немає пароля, у git немає жодного рядка підключення з обліковими даними. Деталі та власні числа: розділ «Redis: кеш, сесії, ліміти, черга».
 
 **Auth (ДЗ №24).** Ключів і pepper у git немає (`secrets/jwt/` у `.gitignore`, у `.env.example` змінні порожні). Грейдер без сховища генерує одноразову пару ES256 (`generateKeyPairSync('ec', { namedCurve: 'P-256', … })`, PEM у base64) і експортує `JWT_KID`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `REFRESH_TOKEN_PEPPER` командою з блоку вище; разом із `SKIP_VAULT=1` обгортка `with-secrets.sh` просто виконує команду, не чіпаючи оточення. `DATABASE_URL` експортується так само, як і раніше. Таблиця `refresh_tokens` створюється `npm run migrate`, тож перед демо потрібні `npm run build` і `npm run migrate` (вони є вище). Голий `npm run start` без цих змінних завершується з ненульовим кодом і називає відсутню змінну. Три демо (`demo:auth`, `demo:reuse`, `demo:rbac`) самі стартують застосунок у процесі, самі прибирають за собою, друкують `key=number` і завершуються ненульовим кодом при порушенні інваріанта; їм потрібні Postgres і `redis-queue` (`REDIS_QUEUE_URL`) з `docker compose up -d --wait`. Деталі: розділ «Auth».
+
+**Файли (ДЗ №26).** Сховище об'єктів піднімає та сама `docker compose up -d --wait` (сервіс `s3`, MinIO на `127.0.0.1:22650`, дані в `tmpfs` на 1 ГіБ). Образ Chainguard не має оболонки й `curl`, тому healthcheck у сервісу немає: готовність гарантує застосунок, `StorageService.ensureBucket` повторює спроби кожні 250 мс до 20 секунд і лише тоді створює бакет. З `SKIP_VAULT=1` обгортка `with-secrets.sh` не виконується, тому грейдер сам експортує `STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY`, `STORAGE_BUCKET` (див. команди вище); ці значення збігаються з тими, що `docker-compose.yml` передає контейнеру, тому експортувати їх треба **до** `docker compose up`. `STORAGE_REGION` має дефолт `us-east-1`. Значення `hw26user` / `hw26secretpass` це dev-значення з `secrets/storage_*.example`, вони навмисно не є секретами. Три демо (`demo:upload`, `demo:multipart`, `demo:cdn`) запускаються через `bash scripts/with-secrets.sh dev …`, самі прибирають свій стан на початку й наприкінці (тому `demo:multipart` у блоці вище запускається двічі підряд), друкують `key=number`, самі перевіряють інваріанти й завершуються ненульовим кодом при порушенні. Таблиця `files` створюється `npm run migrate`. Деталі, власні числа та обґрунтування: розділ «Файли».
 
 Якщо `psql` немає на машині грейдера локально — той самий `SELECT 1`/`SHOW POOLS` перевіряється зсередини вже запущеного контейнера `postgres`, який має власний psql-клієнт:
 
@@ -1029,6 +1040,182 @@ Rolling-деплой: поки інстанси оновлюються по че
 - Ідентифікатори замовлень послідовні, тож id можна перебирати; 404 лише не дозволяє відрізнити чуже замовлення від неіснуючого.
 - У `seller` немає зв'язку із замовленнями, тому `PATCH /orders/:id/status` — це лише `@Roles('seller', 'admin')`, без перевірки «замовлення містить мої товари». Це місце для ReBAC-кортежів (бонус).
 
+## Файли
+
+Завантаження й віддача файлів (ДЗ №26): байти йдуть напряму між клієнтом і об'єктним сховищем (S3-сумісним), а наш API лише видає дозвіл, веде облік у БД і перевіряє результат. Код: `src/files/` (API і таблиця `files`), `src/storage/` (клієнт S3), `src/cdn/` (публікація ассетів і локальний edge-кеш).
+
+### Схема завантаження
+
+    1. POST /uploads/intent  {contentType, size}  → {fileId, url, method, headers}   рядок files: PENDING
+    2. PUT <presigned url> з байтами               → сховище, API не бере участі
+    3. POST /uploads/commit  {fileId}              → HeadObject у сховищі → files: COMPLETED
+
+Чому не через API: файл у 5 ГіБ, прогнаний крізь Node-процес, тримає з'єднання, пам'ять і пропускну здатність, які потрібні для звичайних запитів; прямий PUT переносить це навантаження на сховище. Ціна — API не бачить байтів, тому третій крок обов'язковий: без `commit` запис лишається `PENDING`, а список файлів користувача береться з БД, а не з лістингу сховища.
+
+Ключ об'єкта `uploads/{userId}/{uuid}.{ext}` будує сервер. Ім'я файлу від клієнта (`filename`) DTO приймає й ігнорує: у ключі воно дало б path traversal, колізії та персональні дані в URL. Розширення береться з allowlist за `contentType` (`png`, `jpg`, `webp`, `pdf`, `gz`). `Content-Type` підписується в presigned URL (`signableHeaders`), тож PUT з іншим типом дає 403 (`content-type-swap=403`).
+
+`commit` перевіряє об'єкт через `HeadObject`: немає об'єкта або розмір не збігається із заявленим означає 409, запис лишається `PENDING`. Повторний `commit` ідемпотентний. Чужий файл і неіснуючий однаково дають 404; завершити завантаження може лише власник, скачати ще й `admin`.
+
+Скачування: `GET /files/:id` повертає 302 на свіжий presigned GET URL на 60 секунд із `Cache-Control: no-store`. Гард (хто ти і чи твій це файл) спрацьовує на кожен запит, а не один раз при видачі посилання; редірект браузер виконує одразу, тож URL не доживає до чужих рук.
+
+### Змінні та їхнє джерело
+
+| Змінна | Обов'язкова | Джерело | Опис |
+|--------|:-----------:|---------|------|
+| `STORAGE_ENDPOINT` | ні | обгортка `with-secrets.sh` (дефолт `http://127.0.0.1:22650`) або змінна середовища | Адреса S3-сумісного сховища. Порожня означає справжній AWS S3 |
+| `STORAGE_REGION` | ні (`us-east-1`) | обгортка `with-secrets.sh` (дефолт) або змінна середовища | Регіон для підпису SigV4 |
+| `STORAGE_BUCKET` | так | обгортка `with-secrets.sh` (дефолт `hw26-files`) або змінна середовища | Назва бакета; створюється при старті, якщо його ще немає |
+| `STORAGE_ACCESS_KEY` | так | сховище: `secrets/storage_access_key` через `scripts/with-secrets.sh` | Ключ доступу. Те саме значення читає контейнер `s3` (`MINIO_ROOT_USER`) |
+| `STORAGE_SECRET_KEY` | так | сховище: `secrets/storage_secret_key` через `scripts/with-secrets.sh` | Секретний ключ. Те саме значення читає контейнер `s3` (`MINIO_ROOT_PASSWORD`) |
+| `EDGE_PORT` | ні (`3100`) | змінна середовища | Порт `npm run edge`; демо піднімає edge на порту 0 |
+
+Файли `secrets/storage_*.example` містять dev-значення (`hw26user` / `hw26secretpass`), які навмисно не є секретами, як і пароль БД; справжні `secrets/storage_*` у `.gitignore`. У проді статичні ключі замінює IAM-роль із короткоживучими обліковими даними, а `STORAGE_ENDPOINT` порожній.
+
+### Сховище локально
+
+Сервіс `s3` у `docker-compose.yml` (healthcheck-а немає: в образі Chainguard нема оболонки, тому готовність забезпечує `ensureBucket` з повторами до 20 секунд): MinIO з образу `cgr.dev/chainguard/minio:latest` на `127.0.0.1:22650`, дані в `tmpfs` розміром 1 ГіБ (сховище не переживає `docker compose down`, потрібна для демо чистота важливіша за збереження). Офіційні образи MinIO більше не завантажуються з реєстру, а в Chainguard є лише тег `latest`; для відтворюваності у проді його варто фіксувати за digest. Клієнт створено з `forcePathStyle` (емулятору потрібен шлях `/bucket/key`, а не піддомен) і `requestChecksumCalculation: 'WHEN_REQUIRED'` (інакше новий SDK підписує PUT контрольною сумою CRC32 порожнього тіла, і presigned PUT клієнта без SDK ламається).
+
+### CDN: обрана форма
+
+Обрано **локальний edge-кеш** (`src/cdn/edge.ts`, `npm run edge`): маленький HTTP-сервер, який стоїть перед закритим бакетом, ходить у нього власними обліковими даними, кладе відповіді в пам'ять і віддає заголовок `X-Cache: HIT|MISS`. Правила кешування він бере з `Cache-Control` самого об'єкта: `public` + `max-age=N` дає TTL `N`, а відсутній заголовок, `private` або `no-store` означає «не кешувати». Віддає лише префікс `assets/`: `uploads/…` через нього недоступні, хоча ключі в edge є (`private-via-edge=404`). Методу «очистити кеш» немає взагалі.
+
+Чому не CloudFront: перевірка не має залежати від AWS-акаунта, а механіка та сама: бакет закритий для всіх (`direct=403`), доступ має лише кеш-шар, браузер ходить у кеш. Відмінності від CloudFront: один процес замість мережі PoP, немає TLS, `Range` і умовних запитів, немає мінімального/максимального TTL і tiered cache.
+
+Продакшн-форма цієї ж схеми в AWS: CloudFront з **Origin Access Control** і закритий бакет (Block Public Access увімкнено), політика бакета дозволяє читання лише сервісу CloudFront конкретного distribution:
+
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "AllowCloudFrontServicePrincipalReadOnly",
+          "Effect": "Allow",
+          "Principal": { "Service": "cloudfront.amazonaws.com" },
+          "Action": "s3:GetObject",
+          "Resource": "arn:aws:s3:::hw26-files/assets/*",
+          "Condition": {
+            "StringEquals": {
+              "AWS:SourceArn": "arn:aws:cloudfront::111122223333:distribution/EXAMPLEDISTID"
+            }
+          }
+        }
+      ]
+    }
+
+`Principal` це сервіс, а не анонім, а умова `AWS:SourceArn` не дає чужому distribution (навіть у тому самому акаунті) читати наш бакет. `Resource` обмежено префіксом `assets/`, як і в edge; `111122223333` та `EXAMPLEDISTID` це приклади, реальних ідентифікаторів у репозиторії немає.
+
+### Ассети з хешем і нуль інвалідацій
+
+Кеш CDN це спільна полка в чужих магазинах: прибрати звідти товар можна лише платним, обмеженим за частотою запитом на інвалідацію, який до того ж не дістає кешів у браузерах. Тому файл ніколи не перезаписується: ім'я містить хеш вмісту (`app.<sha256[0:8]>.css`), новий вміст отримує нове ім'я й нову адресу, а старий лишається в кеші й нікому не заважає. Об'єкт кладеться з `Cache-Control: public, max-age=31536000, immutable`, виставленим **на об'єкті при завантаженні** (`PutObject`), а не на CDN: заголовок `Cache-Control` не входить до presigned-підпису, тому для публічних ассетів його ставить сервер, а не клієнт. Демо показує обидва боки: `new-name=1`, `new-url=200`, `content-changed=1`, `old-url-intact=1`; для контрасту `mutable-name-stale=1` (під незмінним іменем кеш віддає старе тіло, поки origin уже нове) і `without-cache-control-hit=0` (без заголовка від origin кешу немає). Інвалідацій у системі нуль.
+
+### Чому саме такі TTL і пороги
+
+| Параметр | Значення | Обґрунтування |
+|----------|----------|---------------|
+| presigned PUT | 300 с | Клієнт починає PUT одразу після intent; 5 хвилин покривають повільну мережу й ретраї, а вікно, у якому витік URL дозволяє перезаписати об'єкт, лишається малим. Термін перевіряється при прийомі запиту, тож довге завантаження, що почалося вчасно, завершиться |
+| presigned GET | 60 с | URL видається на кожен `GET /files/:id` і використовується миттєво через 302; витік живе хвилину |
+| presigned URL частини | 900 с | За раз видається до 100 URL, клієнт вантажить їх пачкою; 15 хвилин вистачає на пачку, а якщо не вистачило, клієнт просить нові URL і відновлюється через `ListParts` |
+| поріг multipart | 10 МіБ (`2 × 5 МіБ`) | Нижче порогу multipart дає не більше однієї повної частини й лише додає запитів; вище є ≥ 2 частин, а отже паралельність і відновлення. Рішення приймає сервер за заявленим `size`, строго «більше порогу» |
+| розмір частини | `ceil(max(5 МіБ, size / 10000) / 1 МіБ) × 1 МіБ` | Мінімум S3 для не останньої частини 5 МіБ, максимум 10 000 частин: для великих файлів частина мусить рости, інакше ліміт у 10 000 частин не вмістить файл |
+
+Приклади розрахунку: 11 МіБ це 3 частини по 5 МіБ; 100 ГіБ це 9 310 частин по 11 МіБ; 5 ТіБ (максимум, `MAX_FILE_SIZE_BYTES`) це 9 987 частин по 525 МіБ. Остання частина може бути меншою за мінімум.
+
+TTL presigned URL не може пережити облікові дані, якими його підписано: SigV4 дозволяє до 7 діб, але з тимчасовими даними (IAM-роль, STS) URL помирає разом із сесією, навіть якщо `expiresIn` більший. Presigned URL не відкликається й не є JWT: це підпис HMAC від методу, шляху, хоста й терміну, тому єдиний важіль це короткий TTL і схема «302 на свіжий URL» замість видачі довгоживучих посилань.
+
+### Multipart і відновлення
+
+Для великих файлів `intent` повертає `mode: "multipart"`, `partSize` і `partCount` та створює `CreateMultipartUpload` (його `upload_id` лежить у рядку `files`). Клієнт просить URL порціями (`POST /uploads/:fileId/parts/urls`, до 100 за запит) і вантажить частини. Після обриву клієнт питає `GET /uploads/:fileId/parts`: це `ListParts` у сховищі, джерело істини про те, що вже лежить. Дозавантажується лише відсутнє. `commit` у multipart-режимі виконує сервер, а не клієнт: `ListParts`, перевірка, що всі частини є, а їхні розміри збігаються з планом, потім `CompleteMultipartUpload` (атомарне перемикання: до нього `HeadObject` дає 404, `head-before-complete=404`) і `HeadObject` для перевірки розміру. ETag такого об'єкта має вигляд `<md5 від md5 частин>-N`, а не MD5 вмісту, тож цілісність за ETag перевіряти не можна; демо звіряє вміст байт у байт.
+
+### Власні числа
+
+Три демо запускаються через `bash scripts/with-secrets.sh dev …`, самі прибирають за собою (`demo:multipart` можна запускати двічі підряд) і завершуються кодом 0. Рядки нижче скопійовано з реальних запусків.
+
+`npm run demo:upload`:
+
+    intent-anon=401
+    intent=200
+    key-from-server=1
+    api-alive-before=1
+    api-alive=0
+    put-offline=200
+    commit=200
+    commit-without-bytes=409
+    content-type-swap=403
+    tampered=403
+    fresh-short-url=200
+    expired=403
+    download-redirect=302
+    download-no-store=1
+    download-match=1
+
+`api-alive=0` означає, що PUT виконано процесом без жодного ключа (лише presigned URL), коли API взагалі не працював: байти справді йдуть повз API. `tampered=403` це змінений підпис, `expired=403` це URL із простроченим терміном.
+
+`npm run demo:multipart` (11 МіБ, дві частини, самовбивство клієнта, відновлення):
+
+    intent=200
+    crash-exit-nonzero=1
+    parts-after-crash=2
+    head-before-complete=404
+    resumed-parts=1
+    complete=200
+    size-match=1
+    etag-multipart=1
+    unfinished-after-complete=0
+    content-match=1
+
+`npm run demo:cdn`:
+
+    direct=403
+    edge-miss=200
+    edge-hit=200
+    cache-hit=1
+    first-is-miss=1
+    cache-control-passthrough=1
+    origin-fetches-for-two-requests=1
+    new-name=1
+    new-url=200
+    new-url-is-miss=1
+    content-changed=1
+    old-url-intact=1
+    mutable-name-stale=1
+    without-cache-control-hit=0
+    private-via-edge=404
+
+### Осиротілі файли
+
+Сироти з'являються трьома шляхами: клієнт отримав intent і зник (рядок `PENDING`, об'єкта може не бути), клієнт поклав байти, але не викликав `commit` (об'єкт є, а облікового запису в стані `COMPLETED` немає), клієнт не довів multipart до кінця (недороблені частини **тарифікуються**, хоч їх і не видно в лістингу об'єктів). У коді це не реалізовано; план такий:
+
+- фонове завдання BullMQ (repeatable, раз на добу) бере `PENDING` старші за 24 години, для multipart викликає `AbortMultipartUpload` за `upload_id`, видаляє об'єкт (`DeleteObject` ідемпотентний) і лише потім рядок у БД: порядок «спершу сховище, потім БД» не залишає об'єкт без обліку;
+- страховка на боці сховища, незалежна від нашого коду: правило lifecycle `AbortIncompleteMultipartUpload` через 7 днів після початку:
+
+        {
+          "Rules": [
+            {
+              "ID": "abort-incomplete-multipart",
+              "Status": "Enabled",
+              "Filter": { "Prefix": "" },
+              "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 7 }
+            }
+          ]
+        }
+
+  Застосовується командою `aws s3api put-bucket-lifecycle-configuration --bucket hw26-files --lifecycle-configuration file://lifecycle.json`. У локальному MinIO правило не налаштоване: демо самі скасовують свої multipart-завантаження.
+
+### Безпека
+
+Presigned URL це bearer-токен: хто його має, той має доступ до закінчення терміну. Тому URL не логується: у `src/files/` і `src/storage/` немає жодного виклику логера, URL існує лише в тілі відповіді або в заголовку `Location`. Щоб проміжні кеші й історія браузера його не зберігали, відповідь `GET /files/:id` має `Cache-Control: no-store`.
+
+Заявлений `Content-Type` це твердження клієнта: сховище не перевіряє, що в `.png` справді PNG. Наступний крок захисту (не реалізовано): у `commit` прочитати перші байти діапазонним GET (`Range: bytes=0-15`) і звірити з сигнатурою (magic bytes) типу з allowlist, плюс віддавати користувацькі файли з `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff` і з окремого домену.
+
+Приватний контент за CDN у AWS закривається підписаними URL (один файл, коротке посилання) або підписаними cookie (багато файлів одразу, наприклад уся тека курсу); ключі перевірки лежать у trusted key group distribution, а підписує застосунок після власної перевірки прав. У цій роботі приватні файли віддаються через `GET /files/:id` і presigned GET, а CDN обслуговує лише публічні ассети.
+
+### Відомі прогалини
+
+- Завдання очищення сиріт описане, але не реалізоване.
+- У `POST /uploads/intent` немає `Idempotency-Key`: повтор запиту після таймауту створює ще один рядок `PENDING`.
+- Немає ліміту частоти на `intent` і квоти на користувача, тож клієнт може наплодити `PENDING`.
+- Розмір перевіряється за HeadObject порівняно із заявленим, а вміст не скануємо (magic bytes, антивірус).
+- Edge-кеш це демонстраційний шим: один процес, пам'ять без витіснення, без TLS, `Range` і умовних запитів.
+
 ## Структура
 
 | Шлях                          | Призначення                                      |
@@ -1117,3 +1304,11 @@ Rolling-деплой: поки інстанси оновлюються по че
 | `test/unit/key-store.spec.ts`, `test/unit/auth-env.spec.ts`, `test/unit/login-throttle.spec.ts`, `test/e2e/orders.gateway.e2e.spec.ts` | Тести правок ревью: overlap-ротація ключів, валідація `JWT_PREVIOUS_*`, ліміт входу, автентифікація WebSocket |
 | `src/lib/query-counter.ts`, `src/lib/demo-output.ts` | Логер TypeORM, що рахує запити за тегом; спільний друк `key=number` і перевірки інваріантів для демо |
 | `src/demo-cache.ts`, `src/demo-session.ts`, `src/demo-ratelimit.ts`, `src/demo-queue.ts` | `npm run demo:cache`, `demo:session`, `demo:ratelimit`, `demo:queue` |
+| `src/storage/` | Клієнт S3: `s3-client.ts` (`forcePathStyle`, `WHEN_REQUIRED`), `storage.config.ts`, `storage.service.ts` (presign PUT/GET/частин, Head, multipart, `ensureBucket`), `storage.constants.ts` (TTL) |
+| `src/files/` | Завантаження файлів: `files.controller.ts` (`/uploads/*`, `/files/:id`), `files.service.ts` (intent, commit, відновлення multipart), `file-key.ts`, `multipart-plan.ts` (поріг і розмір частини), DTO |
+| `src/entities/stored-file.entity.ts`, `src/migrations/1794000000000-FilesTable.ts` | Таблиця `files` (`PENDING`/`COMPLETED`, `upload_id`, CHECK-обмеження) |
+| `src/cdn/` | `publish-asset.ts` (імʼя з хешем, `immutable` на об'єкті) і `edge.ts` (edge-кеш з `X-Cache`) |
+| `src/demo-upload.ts`, `src/demo-multipart.ts`, `src/demo-cdn.ts` | `npm run demo:upload`, `demo:multipart`, `demo:cdn` |
+| `src/edge-main.ts` | `npm run edge`: edge-кеш вручну |
+| `src/lib/` (`files-demo-kit.ts`, `multipart-client.ts`, `multipart-child.ts`, `multipart-runner.ts`, `offline-put*.ts`, `keyless-env.ts`, `net-probe.ts`) | Спільне для демо: очищення, дочірні процеси-клієнти, PUT без ключів, перевірка порту |
+| `secrets/storage_access_key`, `secrets/storage_secret_key` (+ `.example`) | Ключі сховища (перші два в `.gitignore`, `.example` це dev-шаблони) |

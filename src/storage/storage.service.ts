@@ -36,6 +36,13 @@ export interface PendingUpload {
     uploadId: string;
 }
 
+export interface ObjectData {
+    body: Buffer;
+    contentType?: string;
+    cacheControl?: string;
+    etag?: string;
+}
+
 interface S3ErrorShape {
     name?: string;
     $metadata?: { httpStatusCode?: number };
@@ -198,6 +205,36 @@ export class StorageService {
             }
             keyMarker = page.NextKeyMarker;
             uploadIdMarker = page.NextUploadIdMarker;
+        }
+    }
+
+    async putObject(key: string, body: Buffer, contentType: string, cacheControl?: string): Promise<void> {
+        await this.client.send(
+            new PutObjectCommand({
+                Bucket: this.bucket,
+                Key: key,
+                Body: body,
+                ContentType: contentType,
+                CacheControl: cacheControl,
+            }),
+        );
+    }
+
+    async getObject(key: string): Promise<ObjectData | null> {
+        try {
+            const result = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+            const body = result.Body ? Buffer.from(await result.Body.transformToByteArray()) : Buffer.alloc(0);
+            return {
+                body,
+                contentType: result.ContentType,
+                cacheControl: result.CacheControl,
+                etag: result.ETag,
+            };
+        } catch (error) {
+            if (isNotFound(error)) {
+                return null;
+            }
+            throw error;
         }
     }
 

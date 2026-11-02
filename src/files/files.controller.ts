@@ -89,6 +89,16 @@ export class FilesController {
         return this.filesService.presignParts(user.userId, fileId, dto.partNumbers);
     }
 
+    @Get('files/:id')
+    @Redirect()
+    @Header('Cache-Control', 'no-store')
+    @ApiOperation({
+        operationId: 'downloadFile',
+        summary: '302 на свіжий presigned GET URL (дійсний 60 секунд); гард спрацьовує на кожен запит',
+    })
+    @ApiParam({ name: 'id', example: '3f2b8a52-6f0c-4c6b-9d6e-2a9f6c1b7e10' })
+    @ApiFoundResponse({ description: 'Редирект на короткоживучий presigned URL' })
+    @ApiNotFoundResponse({ description: 'Файл не існує, ще не завершений або належить іншому користувачу' })
     async download(
         @Param('id', ParseUUIDPipe) id: string,
         @CurrentUser() user: AccessPrincipal,

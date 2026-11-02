@@ -42,3 +42,10 @@ export function loadStorageConfig(source: NodeJS.ProcessEnv = process.env): Stor
     }
     return storageConfigFromEnv(parsed.data);
 }
+
+export function directObjectUrl(config: StorageConfig, key: string): string {
+    if (config.endpoint) {
+        return `${config.endpoint.replace(/\/$/, '')}/${config.bucket}/${key}`;
+    }
+    return `https://${config.bucket}.s3.${config.region}.amazonaws.com/${key}`;
+}
