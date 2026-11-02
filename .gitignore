@@ -159,3 +159,6 @@ test/**/*.js.map
 pacts/
 
 secrets/jwt/
+
+secrets/storage_access_key
+secrets/storage_secret_key

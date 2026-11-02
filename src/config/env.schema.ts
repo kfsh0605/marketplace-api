@@ -30,6 +30,11 @@ export const envSchema = z.object({
     REFRESH_TOKEN_PEPPER: vaultString().min(32, 'коротший за 32 символи: потрібен випадковий рядок від 32 байтів'),
     JWT_PREVIOUS_KID: optionalVault(),
     JWT_PREVIOUS_PUBLIC_KEY: optionalVault(),
+    STORAGE_ENDPOINT: optionalVault(),
+    STORAGE_REGION: z.string().min(1).default('us-east-1'),
+    STORAGE_BUCKET: z.string().min(1),
+    STORAGE_ACCESS_KEY: vaultString(),
+    STORAGE_SECRET_KEY: vaultString(),
 });
 export type Env = z.infer<typeof envSchema>;
 

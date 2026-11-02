@@ -95,6 +95,18 @@ services:
       timeout: 3s
       retries: 10
 
+  s3:
+    image: cgr.dev/chainguard/minio:latest
+    restart: unless-stopped
+    command: [ "server", "/data", "--address", ":9000", "--console-address", ":9001" ]
+    environment:
+      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY:-hw26user}
+      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY:-hw26secretpass}
+    ports:
+      - "127.0.0.1:22650:9000"
+    tmpfs:
+      - /data:size=1g
+
   pact-broker-db:
     image: postgres:16-alpine
     environment:

@@ -61,4 +61,18 @@ fi
 export REDIS_URL="${REDIS_URL:-redis://${REDIS_HOST:-127.0.0.1}:${REDIS_PORT:-6390}}"
 export REDIS_QUEUE_URL="${REDIS_QUEUE_URL:-redis://${REDIS_HOST:-127.0.0.1}:${REDIS_QUEUE_PORT:-6380}}"
 
+STORAGE_ACCESS_FILE="$ROOT/secrets/storage_access_key"
+STORAGE_SECRET_FILE="$ROOT/secrets/storage_secret_key"
+for f in "$STORAGE_ACCESS_FILE" "$STORAGE_SECRET_FILE"; do
+  if [ ! -f "$f" ]; then
+    echo "with-secrets.sh: не знайдено $f. Створи його з шаблону (cp $f.example $f) або запусти з SKIP_VAULT=1." >&2
+    exit 1
+  fi
+done
+export STORAGE_ACCESS_KEY="$(tr -d '\r\n' < "$STORAGE_ACCESS_FILE")"
+export STORAGE_SECRET_KEY="$(tr -d '\r\n' < "$STORAGE_SECRET_FILE")"
+export STORAGE_ENDPOINT="${STORAGE_ENDPOINT:-http://127.0.0.1:22650}"
+export STORAGE_BUCKET="${STORAGE_BUCKET:-hw26-files}"
+export STORAGE_REGION="${STORAGE_REGION:-us-east-1}"
+
 exec "$@"

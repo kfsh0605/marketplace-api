@@ -324,6 +324,154 @@ paths:
       summary: Перевірка стану застосунку та підключення до БД
       tags:
         - health
+  /uploads/intent:
+    post:
+      operationId: createUploadIntent
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUploadIntentDto'
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadIntentResponse'
+        '400':
+          description: Тип файла поза allowlist або некоректний розмір
+        '401':
+          description: Немає або недійсний access-токен
+      security:
+        - bearer: []
+      summary: 'Крок 1: отримати presigned URL, щоб покласти байти напряму у сховище'
+      tags:
+        - files
+  /uploads/commit:
+    post:
+      operationId: commitUpload
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommitUploadDto'
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileResponse'
+        '401':
+          description: Немає або недійсний access-токен
+        '404':
+          description: Файл не існує або належить іншому користувачу
+        '409':
+          description: >-
+            Об'єкта ще немає у сховищі або його розмір не збігається із
+            заявленим
+      security:
+        - bearer: []
+      summary: >-
+        Крок 3: підтвердити завантаження (сервер перевіряє об'єкт у сховищі
+        через HeadObject)
+      tags:
+        - files
+  /uploads/{fileId}/parts:
+    get:
+      operationId: listUploadedParts
+      parameters:
+        - name: fileId
+          required: true
+          in: path
+          schema:
+            example: 3f2b8a52-6f0c-4c6b-9d6e-2a9f6c1b7e10
+            type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartsResponse'
+        '401':
+          description: Немає або недійсний access-токен
+        '404':
+          description: Файл не існує або належить іншому користувачу
+        '409':
+          description: Файл не очікує multipart-завантаження
+      security:
+        - bearer: []
+      summary: >-
+        Які частини multipart-завантаження вже лежать у сховищі (ListParts): за
+        цим відновлюють після обриву
+      tags:
+        - files
+  /uploads/{fileId}/parts/urls:
+    post:
+      operationId: presignUploadParts
+      parameters:
+        - name: fileId
+          required: true
+          in: path
+          schema:
+            example: 3f2b8a52-6f0c-4c6b-9d6e-2a9f6c1b7e10
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestPartUrlsDto'
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartUrlsResponse'
+        '400':
+          description: Номер частини поза діапазоном
+        '401':
+          description: Немає або недійсний access-токен
+        '404':
+          description: Файл не існує або належить іншому користувачу
+        '409':
+          description: Файл не очікує multipart-завантаження
+      security:
+        - bearer: []
+      summary: Presigned PUT URL для вказаних частин (порціями, не більше 100 за запит)
+      tags:
+        - files
+  /files/{id}:
+    get:
+      operationId: downloadFile
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            example: 3f2b8a52-6f0c-4c6b-9d6e-2a9f6c1b7e10
+            type: string
+      responses:
+        '302':
+          description: Редирект на короткоживучий presigned URL
+        '401':
+          description: Немає або недійсний access-токен
+        '404':
+          description: Файл не існує, ще не завершений або належить іншому користувачу
+      security:
+        - bearer: []
+      summary: >-
+        302 на свіжий presigned GET URL (дійсний 60 секунд); гард спрацьовує на
+        кожен запит
+      tags:
+        - files
 info:
   title: Marketplace API
   description: 'API для навчального курсового проєкту: товари та замовлення'
@@ -578,3 +726,203 @@ components:
             refresh
       required:
         - refreshToken
+    CreateUploadIntentDto:
+      type: object
+      properties:
+        contentType:
+          type: string
+          enum:
+            - image/png
+            - image/jpeg
+            - image/webp
+            - application/pdf
+            - application/gzip
+          example: image/png
+          description: >-
+            MIME-тип файла. Лише з allowlist; саме цей тип клієнт обов'язаний
+            надіслати в заголовку Content-Type при PUT
+        size:
+          type: number
+          example: 204800
+          description: >-
+            Очікуваний розмір у байтах. Якщо вказано, commit звіряє його з
+            реальним розміром у сховищі
+        filename:
+          type: string
+          example: avatar.png
+          description: >-
+            Лише для довідки клієнта. Ігнорується: ключ об'єкта завжди генерує
+            сервер
+      required:
+        - contentType
+    MultipartInfo:
+      type: object
+      properties:
+        partSize:
+          type: number
+          example: 5242880
+          description: Розмір кожної частини, крім останньої
+        partCount:
+          type: number
+          example: 3
+      required:
+        - partSize
+        - partCount
+    UploadIntentResponse:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum:
+            - single
+            - multipart
+          description: >-
+            single: один PUT на url; multipart: частини через
+            /uploads/{fileId}/parts
+        fileId:
+          type: string
+          example: 3f2b8a52-6f0c-4c6b-9d6e-2a9f6c1b7e10
+        key:
+          type: string
+          example: uploads/7/3f2b8a52-6f0c-4c6b-9d6e-2a9f6c1b7e10.png
+        method:
+          type: string
+          example: PUT
+          description: Лише для mode=single
+        url:
+          type: string
+          description: >-
+            Лише для mode=single: presigned URL, клієнт кладе байти напряму
+            сюди, повз наш API
+        headers:
+          type: object
+          example:
+            content-type: image/png
+          description: 'Лише для mode=single: заголовки, які обов''язково надіслати при PUT'
+        multipart:
+          description: Лише для mode=multipart
+          allOf:
+            - $ref: '#/components/schemas/MultipartInfo'
+        expiresInSeconds:
+          type: number
+          example: 300
+          description: 'Строк дії виданого URL (для multipart: URL однієї частини)'
+      required:
+        - mode
+        - fileId
+        - key
+        - expiresInSeconds
+    CommitUploadDto:
+      type: object
+      properties:
+        fileId:
+          type: string
+          example: 3f2b8a52-6f0c-4c6b-9d6e-2a9f6c1b7e10
+          description: fileId з відповіді intent
+      required:
+        - fileId
+    FileResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        key:
+          type: string
+        status:
+          type: string
+          enum:
+            - PENDING
+            - COMPLETED
+        contentType:
+          type: string
+          example: image/png
+        size:
+          type: number
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+        - id
+        - key
+        - status
+        - contentType
+        - size
+        - completedAt
+    PartInfo:
+      type: object
+      properties:
+        partNumber:
+          type: number
+          example: 1
+        size:
+          type: number
+          example: 5242880
+        etag:
+          type: string
+          example: '"5d41402abc4b2a76b9719d911017c592"'
+      required:
+        - partNumber
+        - size
+        - etag
+    PartsResponse:
+      type: object
+      properties:
+        fileId:
+          type: string
+        partSize:
+          type: number
+          example: 5242880
+        partCount:
+          type: number
+          example: 3
+        parts:
+          description: Частини, які вже лежать у сховищі (ListParts)
+          type: array
+          items:
+            $ref: '#/components/schemas/PartInfo'
+      required:
+        - fileId
+        - partSize
+        - partCount
+        - parts
+    RequestPartUrlsDto:
+      type: object
+      properties:
+        partNumbers:
+          example:
+            - 3
+          description: >-
+            Номери частин (з 1), для яких потрібні presigned URL; не більше 100
+            за один запит
+          type: array
+          items:
+            type: number
+      required:
+        - partNumbers
+    PartUrl:
+      type: object
+      properties:
+        partNumber:
+          type: number
+          example: 3
+        url:
+          type: string
+          description: Presigned PUT URL однієї частини
+      required:
+        - partNumber
+        - url
+    PartUrlsResponse:
+      type: object
+      properties:
+        expiresInSeconds:
+          type: number
+          example: 900
+        urls:
+          type: array
+          items:
+            $ref: '#/components/schemas/PartUrl'
+      required:
+        - expiresInSeconds
+        - urls
