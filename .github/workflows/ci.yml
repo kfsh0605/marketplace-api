@@ -117,5 +117,5 @@ jobs:
 
       - name: Сканування образу з порогом
         env:
-          SCAN_MAX: '13'
+          SCAN_MAX: '7'
         run: npm run scan

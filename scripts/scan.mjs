@@ -10,7 +10,7 @@ const { collectFindings, evaluateGate, parseMax, parseSeverities } = require('./
 const IMAGE = process.env.SCAN_IMAGE ?? 'marketplace-api:hw28';
 const SCANNER = process.env.SCAN_TRIVY_IMAGE ?? 'aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c';
 const CACHE_VOLUME = 'hw28-trivy-cache';
-const DEFAULT_MAX = 13;
+const DEFAULT_MAX = 7;
 
 function run(command, args, options = {}) {
     const result = spawnSync(command, args, { stdio: ['ignore', 'ignore', 'inherit'], ...options });
