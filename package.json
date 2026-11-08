@@ -37,6 +37,7 @@
     "edge": "bash scripts/with-secrets.sh dev node dist/edge-main.js",
     "k8s:serve": "bash scripts/with-secrets.sh dev node dist/k8s/server.js",
     "image:build": "docker build -f docker/Dockerfile --secret id=npm_token,src=.npm_token -t marketplace-api:hw28 .",
+    "demo:image": "node demo/image.mjs",
     "rabbit:setup": "bash scripts/with-secrets.sh dev node dist/messaging/setup.js",
     "consumer": "bash scripts/with-secrets.sh dev node dist/messaging/run-consumer.js",
     "queue:worker": "bash scripts/with-secrets.sh dev node dist/queue/run-worker.js",
