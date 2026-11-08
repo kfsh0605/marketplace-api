@@ -162,3 +162,6 @@ secrets/jwt/
 
 secrets/storage_access_key
 secrets/storage_secret_key
+
+.npm_token
+.pulumi/

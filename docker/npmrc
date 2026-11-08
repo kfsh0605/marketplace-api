@@ -1,0 +1,2 @@
+@marketplace-private:registry=https://npm.private.invalid/
+//npm.private.invalid/:_authToken=${NPM_TOKEN}
