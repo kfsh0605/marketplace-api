@@ -1,6 +1,7 @@
 import { startEdge } from './cdn/edge';
 import { ASSETS_PREFIX, hashedAssetName, IMMUTABLE_CACHE_CONTROL, publishAsset } from './cdn/publish-asset';
 import { expectEq, printLines, runStandalone } from './lib/demo-output';
+import { sleep } from './lib/sleep';
 import { directObjectUrl, loadStorageConfig } from './storage/storage.config';
 import { StorageService } from './storage/storage.service';
 
@@ -9,16 +10,19 @@ const CSS_V2 = 'body{color:green}\n';
 const MUTABLE_KEY = `${ASSETS_PREFIX}app.css`;
 const NO_CACHE_CONTROL_KEY = `${ASSETS_PREFIX}no-cache-control.css`;
 const SHORT_CACHE_CONTROL = 'public, max-age=60';
+const REVALIDATE_KEY = `${ASSETS_PREFIX}revalidate.css`;
+const REVALIDATE_CACHE_CONTROL = 'public, max-age=1';
 
 const KEY_V1 = `${ASSETS_PREFIX}${hashedAssetName('app', 'css', Buffer.from(CSS_V1))}`;
 const KEY_V2 = `${ASSETS_PREFIX}${hashedAssetName('app', 'css', Buffer.from(CSS_V2))}`;
-const KNOWN_KEYS = [KEY_V1, KEY_V2, MUTABLE_KEY, NO_CACHE_CONTROL_KEY];
+const KNOWN_KEYS = [KEY_V1, KEY_V2, MUTABLE_KEY, NO_CACHE_CONTROL_KEY, REVALIDATE_KEY];
 
 interface Fetched {
     status: number;
     body: string;
     cache: string | null;
     cacheControl: string | null;
+    etag: string | null;
 }
 
 async function get(url: string): Promise<Fetched> {
@@ -28,6 +32,7 @@ async function get(url: string): Promise<Fetched> {
         body: await response.text(),
         cache: response.headers.get('x-cache'),
         cacheControl: response.headers.get('cache-control'),
+        etag: response.headers.get('etag'),
     };
 }
 
@@ -68,6 +73,19 @@ void runStandalone(async (failures) => {
         await get(edgeUrl(NO_CACHE_CONTROL_KEY));
         const withoutCacheControl = await get(edgeUrl(NO_CACHE_CONTROL_KEY));
 
+        const head = await fetch(edgeUrl(v1.key), { method: 'HEAD' });
+        const headBody = await head.text();
+
+        const conditional = await fetch(edgeUrl(v1.key), { headers: { 'if-none-match': second.etag ?? '' } });
+        const conditionalBody = await conditional.text();
+
+        await storage.putObject(REVALIDATE_KEY, Buffer.from(CSS_V1), 'text/css', REVALIDATE_CACHE_CONTROL);
+        const revalidateFirst = await get(edgeUrl(REVALIDATE_KEY));
+        await sleep(1200);
+        const fetchesBeforeRevalidation = edge.originFetches();
+        const revalidateSecond = await get(edgeUrl(REVALIDATE_KEY));
+        const revalidateFetches = edge.originFetches() - fetchesBeforeRevalidation;
+
         const privateViaEdge = await get(edgeUrl('uploads/1/secret.png'));
 
         const results = {
@@ -86,6 +104,18 @@ void runStandalone(async (failures) => {
             'mutable-name-stale':
                 stale.cache === 'HIT' && stale.body === CSS_V1 && originNow?.body.toString() === CSS_V2 ? 1 : 0,
             'without-cache-control-hit': withoutCacheControl.cache === 'HIT' ? 1 : 0,
+            'head-status': head.status,
+            'head-no-body': headBody.length === 0 ? 1 : 0,
+            'head-length-match': head.headers.get('content-length') === String(Buffer.byteLength(CSS_V1)) ? 1 : 0,
+            'conditional-304': conditional.status,
+            'conditional-no-body': conditionalBody.length === 0 ? 1 : 0,
+            revalidated:
+                revalidateFirst.cache === 'MISS' &&
+                revalidateSecond.cache === 'REVALIDATED' &&
+                revalidateSecond.body === CSS_V1
+                    ? 1
+                    : 0,
+            'revalidate-origin-fetches': revalidateFetches,
             'private-via-edge': privateViaEdge.status,
         };
         printLines(results);
@@ -104,6 +134,13 @@ void runStandalone(async (failures) => {
         expectEq(failures, 'old-url-intact', results['old-url-intact'], 1);
         expectEq(failures, 'mutable-name-stale', results['mutable-name-stale'], 1);
         expectEq(failures, 'without-cache-control-hit', results['without-cache-control-hit'], 0);
+        expectEq(failures, 'head-status', results['head-status'], 200);
+        expectEq(failures, 'head-no-body', results['head-no-body'], 1);
+        expectEq(failures, 'head-length-match', results['head-length-match'], 1);
+        expectEq(failures, 'conditional-304', results['conditional-304'], 304);
+        expectEq(failures, 'conditional-no-body', results['conditional-no-body'], 1);
+        expectEq(failures, 'revalidated', results.revalidated, 1);
+        expectEq(failures, 'revalidate-origin-fetches', results['revalidate-origin-fetches'], 1);
         expectEq(failures, 'private-via-edge', results['private-via-edge'], 404);
     } finally {
         await removeKnownObjects(storage);

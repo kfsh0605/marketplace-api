@@ -5,6 +5,7 @@ import {
     CreateMultipartUploadCommand,
     DeleteObjectCommand,
     GetObjectCommand,
+    GetObjectCommandOutput,
     HeadBucketCommand,
     HeadObjectCommand,
     ListMultipartUploadsCommand,
@@ -51,6 +52,21 @@ interface S3ErrorShape {
 function isNotFound(error: unknown): boolean {
     const shape = error as S3ErrorShape;
     return shape?.name === 'NotFound' || shape?.name === 'NoSuchKey' || shape?.$metadata?.httpStatusCode === 404;
+}
+
+function isNotModified(error: unknown): boolean {
+    const shape = error as S3ErrorShape;
+    return shape?.name === 'NotModified' || shape?.$metadata?.httpStatusCode === 304;
+}
+
+async function toObjectData(result: GetObjectCommandOutput): Promise<ObjectData> {
+    const body = result.Body ? Buffer.from(await result.Body.transformToByteArray()) : Buffer.alloc(0);
+    return {
+        body,
+        contentType: result.ContentType,
+        cacheControl: result.CacheControl,
+        etag: result.ETag,
+    };
 }
 
 function isTransient(error: unknown): boolean {
@@ -223,14 +239,25 @@ export class StorageService {
     async getObject(key: string): Promise<ObjectData | null> {
         try {
             const result = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
-            const body = result.Body ? Buffer.from(await result.Body.transformToByteArray()) : Buffer.alloc(0);
-            return {
-                body,
-                contentType: result.ContentType,
-                cacheControl: result.CacheControl,
-                etag: result.ETag,
-            };
+            return await toObjectData(result);
         } catch (error) {
+            if (isNotFound(error)) {
+                return null;
+            }
+            throw error;
+        }
+    }
+
+    async getObjectIfChanged(key: string, etag: string): Promise<ObjectData | 'not-modified' | null> {
+        try {
+            const result = await this.client.send(
+                new GetObjectCommand({ Bucket: this.bucket, Key: key, IfNoneMatch: etag }),
+            );
+            return await toObjectData(result);
+        } catch (error) {
+            if (isNotModified(error)) {
+                return 'not-modified';
+            }
             if (isNotFound(error)) {
                 return null;
             }
