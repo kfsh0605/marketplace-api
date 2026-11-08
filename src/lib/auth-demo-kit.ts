@@ -23,6 +23,7 @@ export interface CallResult {
 
 export interface DemoApp {
     dataSource: DataSource;
+    port: number;
     call(method: string, path: string, options?: CallOptions): Promise<CallResult>;
     stop(): Promise<void>;
 }
@@ -37,10 +38,12 @@ export async function startDemoApp(): Promise<DemoApp> {
     const app = await NestFactory.create(AppModule, { logger: ['error'] });
     configureApp(app);
     await app.listen(0, '127.0.0.1');
-    const baseUrl = `http://127.0.0.1:${(app.getHttpServer().address() as AddressInfo).port}`;
+    const port = (app.getHttpServer().address() as AddressInfo).port;
+    const baseUrl = `http://127.0.0.1:${port}`;
 
     return {
         dataSource: app.get(DataSource),
+        port,
         async call(method, path, options = {}) {
             const headers: Record<string, string> = { ...options.headers };
             if (options.token) {

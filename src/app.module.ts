@@ -7,8 +7,10 @@ import { OrdersModule } from './orders/orders.module';
 import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './auth/auth.module';
+import { FilesModule } from './files/files.module';
 import { validateEnv } from './config/env.schema';
 import { validateAuthEnv } from './config/auth-env';
+
 
 @Module({
     imports: [
@@ -23,6 +25,7 @@ import { validateAuthEnv } from './config/auth-env';
         MessagingModule,
         RedisModule,
         AuthModule,
+        FilesModule,
     ],
     controllers: [],
     providers: [],

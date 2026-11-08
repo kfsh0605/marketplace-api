@@ -20,6 +20,7 @@ import { CheckoutSchema1789593338925 } from '../../../src/migrations/17895933389
 import { OutboxAndProcessedMessages1791300000000 } from '../../../src/migrations/1791300000000-OutboxAndProcessedMessages';
 import { IdempotencyKeys1791400000000 } from '../../../src/migrations/1791400000000-IdempotencyKeys';
 import { AuthTables1793000000000 } from '../../../src/migrations/1793000000000-AuthTables';
+import { FilesTable1794000000000 } from '../../../src/migrations/1794000000000-FilesTable';
 
 function setAuthEnv(): void {
     const { privateKey, publicKey } = generateKeyPairSync('ec', {
@@ -31,6 +32,14 @@ function setAuthEnv(): void {
     process.env.JWT_PRIVATE_KEY = Buffer.from(privateKey).toString('base64');
     process.env.JWT_PUBLIC_KEY = Buffer.from(publicKey).toString('base64');
     process.env.REFRESH_TOKEN_PEPPER = 'e2e-pepper-'.repeat(4);
+}
+
+function setStorageEnv(): void {
+    process.env.STORAGE_ENDPOINT = 'http://127.0.0.1:1';
+    process.env.STORAGE_REGION = 'us-east-1';
+    process.env.STORAGE_BUCKET = 'e2e-files';
+    process.env.STORAGE_ACCESS_KEY = 'e2e-access-key';
+    process.env.STORAGE_SECRET_KEY = 'e2e-secret-key';
 }
 
 export interface E2eApp {
@@ -61,6 +70,7 @@ export async function bootstrapE2eApp(): Promise<E2eApp> {
             OutboxAndProcessedMessages1791300000000,
             IdempotencyKeys1791400000000,
             AuthTables1793000000000,
+            FilesTable1794000000000
         ],
         synchronize: false,
     });
@@ -75,6 +85,7 @@ export async function bootstrapE2eApp(): Promise<E2eApp> {
     process.env.REDIS_DISABLED = '1';
     process.env.REDIS_QUEUE_URL = `redis://${redisContainer.getHost()}:${redisContainer.getMappedPort(6379)}`;
     setAuthEnv();
+    setStorageEnv();
     const { AppModule } = require('../../../src/app.module') as { AppModule: typeof AppModuleType };
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -109,6 +120,11 @@ export async function bootstrapE2eApp(): Promise<E2eApp> {
             delete process.env.JWT_PUBLIC_KEY;
             delete process.env.REFRESH_TOKEN_PEPPER;
             delete process.env.REDIS_QUEUE_URL;
+            delete process.env.STORAGE_ENDPOINT;
+            delete process.env.STORAGE_REGION;
+            delete process.env.STORAGE_BUCKET;
+            delete process.env.STORAGE_ACCESS_KEY;
+            delete process.env.STORAGE_SECRET_KEY;
         },
     };
 }

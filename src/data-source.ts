@@ -5,6 +5,7 @@ import { Product } from './entities/product.entity';
 import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
 import { PostProcessingJob } from './entities/post-processing-job.entity';
+import { StoredFile } from './entities/stored-file.entity'
 
 export const AppDataSource = new DataSource({
     type: 'postgres',
@@ -13,7 +14,7 @@ export const AppDataSource = new DataSource({
     username: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
     database: process.env.DB_NAME,
-    entities: [User, Product, Order, OrderItem, PostProcessingJob],
+    entities: [User, Product, Order, OrderItem, PostProcessingJob, StoredFile],
     migrations: ['dist/migrations/*.js'],
     synchronize: false,
     logging: ['query'],
