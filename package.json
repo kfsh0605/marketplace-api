@@ -35,6 +35,7 @@
     "demo:multipart": "bash scripts/with-secrets.sh dev node dist/demo-multipart.js",
     "demo:cdn": "bash scripts/with-secrets.sh dev node dist/demo-cdn.js",
     "edge": "bash scripts/with-secrets.sh dev node dist/edge-main.js",
+    "k8s:serve": "bash scripts/with-secrets.sh dev node dist/k8s/server.js",
     "rabbit:setup": "bash scripts/with-secrets.sh dev node dist/messaging/setup.js",
     "consumer": "bash scripts/with-secrets.sh dev node dist/messaging/run-consumer.js",
     "queue:worker": "bash scripts/with-secrets.sh dev node dist/queue/run-worker.js",
