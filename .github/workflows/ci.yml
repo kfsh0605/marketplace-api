@@ -102,3 +102,20 @@ jobs:
             echo "can-i-deploy: deployable=$deployable — блокуємо деплой"
             exit 1
           fi
+
+  image-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Секрет збірки (файл-приманка)
+        run: printf 'ci-dummy-npm-token' > .npm_token
+
+      - name: Збірка образу
+        run: npm run image:build
+
+      - name: Сканування образу з порогом
+        env:
+          SCAN_MAX: '7'
+        run: npm run scan

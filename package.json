@@ -35,6 +35,16 @@
     "demo:multipart": "bash scripts/with-secrets.sh dev node dist/demo-multipart.js",
     "demo:cdn": "bash scripts/with-secrets.sh dev node dist/demo-cdn.js",
     "edge": "bash scripts/with-secrets.sh dev node dist/edge-main.js",
+    "k8s:serve": "bash scripts/with-secrets.sh dev node dist/k8s/server.js",
+    "image:build": "docker build --provenance=false -f docker/Dockerfile --secret id=npm_token,src=.npm_token -t marketplace-api:hw28 .",
+    "scan": "node scripts/scan.mjs",
+    "cluster:up": "bash scripts/cluster-up.sh",
+    "cluster:down": "kind delete cluster --name hw28",
+    "up": "bash scripts/with-secrets.sh dev bash scripts/pulumi.sh up",
+    "destroy": "bash scripts/with-secrets.sh dev bash scripts/pulumi.sh destroy",
+    "demo:image": "node demo/image.mjs",
+    "demo:rollout": "bash scripts/with-secrets.sh dev node demo/rollout.mjs",
+    "demo:pdb": "node demo/pdb.mjs",
     "rabbit:setup": "bash scripts/with-secrets.sh dev node dist/messaging/setup.js",
     "consumer": "bash scripts/with-secrets.sh dev node dist/messaging/run-consumer.js",
     "queue:worker": "bash scripts/with-secrets.sh dev node dist/queue/run-worker.js",
@@ -49,6 +59,9 @@
     "test:contract": "jest --config jest.config.js --selectProjects contract"
   },
   "license": "MIT",
+  "overrides": {
+    "multer": "2.5.0"
+  },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1161.0",
     "@aws-sdk/s3-request-presigner": "^3.1161.0",

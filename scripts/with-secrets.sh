@@ -58,6 +58,8 @@ if [ -f "$JWT_DIR/previous_public.pem" ] && [ -f "$JWT_DIR/previous_kid" ]; then
   export JWT_PREVIOUS_KID="$(tr -d '\r\n' < "$JWT_DIR/previous_kid")"
   export JWT_PREVIOUS_PUBLIC_KEY="$(node -e 'process.stdout.write(require("fs").readFileSync(process.argv[1]).toString("base64"))' "$JWT_DIR/previous_public.pem")"
 fi
+export JWT_PREVIOUS_KID="${JWT_PREVIOUS_KID-}"
+export JWT_PREVIOUS_PUBLIC_KEY="${JWT_PREVIOUS_PUBLIC_KEY-}"
 export REDIS_URL="${REDIS_URL:-redis://${REDIS_HOST:-127.0.0.1}:${REDIS_PORT:-6390}}"
 export REDIS_QUEUE_URL="${REDIS_QUEUE_URL:-redis://${REDIS_HOST:-127.0.0.1}:${REDIS_QUEUE_PORT:-6380}}"
 
@@ -74,5 +76,10 @@ export STORAGE_SECRET_KEY="$(tr -d '\r\n' < "$STORAGE_SECRET_FILE")"
 export STORAGE_ENDPOINT="${STORAGE_ENDPOINT:-http://127.0.0.1:22650}"
 export STORAGE_BUCKET="${STORAGE_BUCKET:-hw26-files}"
 export STORAGE_REGION="${STORAGE_REGION:-us-east-1}"
+
+PULUMI_PASSPHRASE_FILE="$ROOT/secrets/pulumi_passphrase"
+if [ -f "$PULUMI_PASSPHRASE_FILE" ]; then
+  export PULUMI_CONFIG_PASSPHRASE="$(tr -d '\r\n' < "$PULUMI_PASSPHRASE_FILE")"
+fi
 
 exec "$@"
