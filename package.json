@@ -38,6 +38,8 @@
     "k8s:serve": "bash scripts/with-secrets.sh dev node dist/k8s/server.js",
     "image:build": "docker build --provenance=false -f docker/Dockerfile --secret id=npm_token,src=.npm_token -t marketplace-api:hw28 .",
     "scan": "node scripts/scan.mjs",
+    "cluster:up": "bash scripts/cluster-up.sh",
+    "cluster:down": "kind delete cluster --name hw28",
     "demo:image": "node demo/image.mjs",
     "rabbit:setup": "bash scripts/with-secrets.sh dev node dist/messaging/setup.js",
     "consumer": "bash scripts/with-secrets.sh dev node dist/messaging/run-consumer.js",
