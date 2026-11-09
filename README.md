@@ -69,7 +69,7 @@ npm install
 npm run check:env
 
 
-**Секрети:** `.env` і `secrets/db_password` ніколи не комітяться в git (див. `.gitignore`) і ніколи не потрапляють у Docker-образ (див. `.dockerignore`) — у самому образі є лише `.env.example` як довідковий шаблон. У `Dockerfile`/`docker-compose.yml` немає жодного реального значення секрету: Postgres теж отримує пароль через файл (`POSTGRES_PASSWORD_FILE`, той самий `secrets/db_password`), а не через змінну середовища. У git натомість лежить `secrets/db_password.example` — шаблон із заглушкою, з якого й копіюється реальний файл. Той самий пароль (навмисно не є секретом, домовленість з ДЗ №11) прописаний і в `pgbouncer/userlist.txt` — інакше PgBouncer не зможе піднімати власне з'єднання до Postgres.
+**Секрети:** `.env` і `secrets/db_password` ніколи не комітяться в git (див. `.gitignore`) і ніколи не потрапляють у Docker-образ (див. `.dockerignore`) — у самому образі є лише `.env.example` як довідковий шаблон. У `docker/Dockerfile`/`docker-compose.yml` немає жодного реального значення секрету: Postgres теж отримує пароль через файл (`POSTGRES_PASSWORD_FILE`, той самий `secrets/db_password`), а не через змінну середовища. У git натомість лежить `secrets/db_password.example` — шаблон із заглушкою, з якого й копіюється реальний файл. Той самий пароль (навмисно не є секретом, домовленість з ДЗ №11) прописаний і в `pgbouncer/userlist.txt` — інакше PgBouncer не зможе піднімати власне з'єднання до Postgres.
 
 ## Запуск
 
@@ -120,9 +120,12 @@ curl http://localhost:3000/health # uptime має бути більшим, а н
 
 ## Docker
 
-Збірка production-образу застосунку (multi-stage build — фінальний образ не містить dev-залежностей, TypeScript-джерел, `.env` і `secrets/`):
+Production-образ збирається з `docker/Dockerfile` (ДЗ №28; раніше Dockerfile лежав у корені): три стадії, фінальний образ distroless без оболонки, від користувача 65532, без dev-залежностей, TypeScript-джерел, `.env` і `secrets/`. Секрет збірки (токен приватного npm-реєстру) приходить через BuildKit `--mount=type=secret` з файла `.npm_token` і не потрапляє в історію, конфіг чи шари образу (це доводить `npm run demo:image`). Збірка:
 
-docker build -t marketplace-api .
+    printf 'dummy-npm-token' > .npm_token
+    npm run image:build
+
+Точка входу образу `dist/k8s/server.js`: це HTTP-оболонка для кластера (розділ «Kubernetes»), а не повний Nest-застосунок. Повний застосунок запускається через `docker compose` і `npm run start:vault`.
 
 
 ## База даних (ДЗ №12)
@@ -469,6 +472,22 @@ Provider verification (`test/contract/verify-provider.ts`) піднімає сп
 
     docker compose exec -T rabbitmq rabbitmq-diagnostics -q check_running
 
+    export PULUMI_CONFIG_PASSPHRASE=hw28-grading
+    mkdir -p .pulumi
+    export PULUMI_BACKEND_URL="file://$PWD/.pulumi"
+    export JWT_PREVIOUS_KID=
+    export JWT_PREVIOUS_PUBLIC_KEY=
+    npm --prefix infra ci
+    (cd infra && npx tsc --noEmit)
+    printf 'dummy-npm-token' > .npm_token
+    npm run image:build
+    npm run cluster:up
+    npm run up
+    npm run demo:image
+    npm run scan
+    npm run demo:rollout
+    npm run demo:pdb
+
 `DB_PASSWORD=VgiPEzaFq/5KKivNpzGqUnko2bXMpiT2` — те саме dev-значення, що лежить у `secrets/db_password.example`, `pgbouncer/userlist.txt` і завжди використовується для локальної розробки; воно навмисно не є секретом (домовленість з ДЗ №11). У `DATABASE_URL` той самий пароль йде вже URL-кодованим (`%2F` замість `/`) — інакше `/` в паролі зламав би розбір рядка підключення. Крок `cp secrets/db_password.example secrets/db_password` обов'язковий: без нього Docker при спробі змонтувати неіснуючий секрет-файл створить на його місці порожню директорію замість файлу, і Postgres впаде з помилкою "superuser password is not specified" (перевірено на реальному чистому клоні).
 
 **RabbitMQ (ДЗ №19).** Брокер піднімається тією самою командою `docker compose up -d --wait`: `--wait` чекає healthcheck `rabbitmq-diagnostics -q check_running`, тож після повернення команди брокер уже готовий приймати з'єднання. Клієнти ходять по **AMQP на порту 5672** (`amqp://marketplace:<пароль>@127.0.0.1:5672`), а не на 15672: це HTTP-панель управління, AMQP-клієнт там отримає помилку протоколу. Оскільки з `SKIP_VAULT=1` обгортка `with-secrets.sh` не виконується, `RABBITMQ_URL` грейдер експортує сам (див. команди вище). `RABBITMQ_PASSWORD` — те саме dev-значення, що лежить у `secrets/rabbitmq_password.example` і є дефолтом у `docker-compose.yml`; воно навмисно не є секретом (як і пароль БД). Крок `cp secrets/rabbitmq_password.example secrets/rabbitmq_password` потрібен для запуску без `SKIP_VAULT`. Три демо (`demo:publish`, `demo:dlq`, `demo:duplicate`) самі скидають свій стан, друкують `key=value`, самі перевіряють інваріанти й завершуються ненульовим кодом при порушенні; перед ними не має працювати `npm run consumer` (чужий споживач на тій самій черзі забрав би частину повідомлень, і демо чесно впаде).
@@ -480,6 +499,8 @@ Provider verification (`test/contract/verify-provider.ts`) піднімає сп
 **Auth (ДЗ №24).** Ключів і pepper у git немає (`secrets/jwt/` у `.gitignore`, у `.env.example` змінні порожні). Грейдер без сховища генерує одноразову пару ES256 (`generateKeyPairSync('ec', { namedCurve: 'P-256', … })`, PEM у base64) і експортує `JWT_KID`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `REFRESH_TOKEN_PEPPER` командою з блоку вище; разом із `SKIP_VAULT=1` обгортка `with-secrets.sh` просто виконує команду, не чіпаючи оточення. `DATABASE_URL` експортується так само, як і раніше. Таблиця `refresh_tokens` створюється `npm run migrate`, тож перед демо потрібні `npm run build` і `npm run migrate` (вони є вище). Голий `npm run start` без цих змінних завершується з ненульовим кодом і називає відсутню змінну. Три демо (`demo:auth`, `demo:reuse`, `demo:rbac`) самі стартують застосунок у процесі, самі прибирають за собою, друкують `key=number` і завершуються ненульовим кодом при порушенні інваріанта; їм потрібні Postgres і `redis-queue` (`REDIS_QUEUE_URL`) з `docker compose up -d --wait`. Деталі: розділ «Auth».
 
 **Файли (ДЗ №26).** Сховище об'єктів піднімає та сама `docker compose up -d --wait` (сервіс `s3`, MinIO на `127.0.0.1:22650`, дані в `tmpfs` на 1 ГіБ). Образ Chainguard не має оболонки й `curl`, тому healthcheck у сервісу немає: готовність гарантує застосунок, `StorageService.ensureBucket` повторює спроби кожні 250 мс до 20 секунд і лише тоді створює бакет. З `SKIP_VAULT=1` обгортка `with-secrets.sh` не виконується, тому грейдер сам експортує `STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY`, `STORAGE_BUCKET` (див. команди вище); ці значення збігаються з тими, що `docker-compose.yml` передає контейнеру, тому експортувати їх треба **до** `docker compose up`. `STORAGE_REGION` має дефолт `us-east-1`. Значення `hw26user` / `hw26secretpass` це dev-значення з `secrets/storage_*.example`, вони навмисно не є секретами. Три демо (`demo:upload`, `demo:multipart`, `demo:cdn`) запускаються через `bash scripts/with-secrets.sh dev …`, самі прибирають свій стан на початку й наприкінці (тому `demo:multipart` у блоці вище запускається двічі підряд), друкують `key=number`, самі перевіряють інваріанти й завершуються ненульовим кодом при порушенні. Таблиця `files` створюється `npm run migrate`. Деталі, власні числа та обґрунтування: розділ «Файли».
+
+**Kubernetes (ДЗ №28).** Останні команди блоку піднімають кластер; потрібні Docker, `kind` і `kubectl` у `PATH`. `PULUMI_CONFIG_PASSPHRASE=hw28-grading` і файловий бекенд у `.pulumi` (у `.gitignore`) означають, що акаунт Pulumi не потрібен, а стан не залежить від чужої парольної фрази. Програма в `infra/` вимагає весь набір змінних із таблиці розділу «Kubernetes» до створення будь-якого ресурсу, тож усе має бути експортовано до `npm run up`: `JWT_PREVIOUS_KID` і `JWT_PREVIOUS_PUBLIC_KEY` задаються порожніми (це означає «ротації немає»), `DATABASE_URL` і ключі беруться з експортів вище. Файл `.npm_token` з `dummy-npm-token` це файл-приманка: збірка вимагає секрет збірки, а приватного реєстру нема, тож значення довільне, і саме його відсутність у шарах доводить `demo:image`. Очікувані підсумки: `demo:image` дає `stages=3`, `shell-inside=0`, `runtime-uid=65532`, `token-in-*=0`; `demo:rollout` дає `failed=0` при `requests>=5000`; `demo:pdb` дає `evict-1=201` і `evict-2=429`. Перший запуск довгий: збірка образу, ще три збірки в `demo:image`, завантаження Trivy і створення кластера займають кілька хвилин. На Windows `PULUMI_BACKEND_URL` у вигляді `file://$PWD/.pulumi` не годиться (шлях `/c/...` Pulumi не розуміє): залиште змінну незаданою, `scripts/pulumi.sh` складе шлях сам. Ще одна пастка Git Bash: якщо `node` там є аліасом на `winpty`, команда з `eval "$(node -e …)"` друкує `stdout is not a tty` і нічого не експортує, а `loadSettings` потім чесно називає відсутні `JWT_KID`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `REFRESH_TOKEN_PEPPER`; пишіть `command node -e …`.
 
 Якщо `psql` немає на машині грейдера локально — той самий `SELECT 1`/`SHOW POOLS` перевіряється зсередини вже запущеного контейнера `postgres`, який має власний psql-клієнт:
 
@@ -1226,6 +1247,200 @@ Presigned URL це bearer-токен: хто його має, той має до
 - Розмір перевіряється за HeadObject порівняно із заявленим, а вміст не скануємо (magic bytes, антивірус).
 - Edge-кеш це демонстраційний шим: один процес, кеш у пам'яті (з лімітом і витісненням LRU), без TLS і `Range`, без single-flight (два одночасні MISS на один ключ обидва йдуть у сховище).
 
+## Kubernetes (ДЗ №28)
+
+Образ, кластер і розкочування без втрат. Головне твердження («rolling update не губить жодного запиту») доведене виміром: `npm run demo:rollout` пише код кожної відповіді в файл і рахує підсумок з нього, а не з пам'яті лічильника.
+
+### Запуск
+
+    npm run image:build
+    npm run cluster:up
+    npm run up
+    npm run demo:image
+    npm run scan
+    npm run demo:rollout
+    npm run demo:pdb
+    npm run destroy
+    npm run cluster:down
+
+| Команда | Що робить |
+|---------|-----------|
+| `npm run image:build` | Збирає `marketplace-api:hw28` з `docker/Dockerfile`; секрет збірки читається з файла `.npm_token` (у `.gitignore`), без нього збірка не стартує |
+| `npm run cluster:up` | Створює kind-кластер `hw28`, якщо його немає, завантажує образ у вузол і чекає `Ready` |
+| `npm run up` | `pulumi up` програми з `infra/`: Namespace, Secret, Deployment, Service, PDB, HPA |
+| `npm run demo:image` | Будує образ із випадковим токеном і вимірює: `stages`, `shell-inside`, `runtime-uid`, `token-in-history/config/layers`, плюс два негативні контролі |
+| `npm run scan` | Trivy у Docker, вердикт рахується власним кодом зі звіту: `image=`, `severity=`, `found=`, `max-allowed=`, `gate=` |
+| `npm run demo:rollout` | Rolling update під навантаженням: `profile`, `requests`, `ok`, `failed`, `rollout-seconds` |
+| `npm run demo:pdb` | Дві спроби виселення через Eviction API: `healthy`, `minAvailable`, `evict-1`, `evict-2` |
+| `npm run destroy` | `pulumi destroy` |
+| `npm run cluster:down` | Видаляє kind-кластер |
+
+### На чому підіймав
+
+Windows + Git Bash, Docker Desktop 29.8.1 (виділено 15,49 ГіБ пам'яті), kind v0.33.0 (вузол Kubernetes v1.37.0), kubectl v1.36.1, Pulumi 3.274.1, Node 24.20. Кластер із одного вузла. Виміряно у цьому оточенні: перший `npm run cluster:up` 1 хв 14 с (створення кластера і завантаження образу, 621,1 МіБ у вузлі), повторний 7,9 с; `npm run up` на чистому кластері 15 с; вузол kind після `npm run up` займає 859,6 МіБ із 15,49 ГіБ (`docker stats --no-stream`). Запас є, але кластер має бути один одночасно.
+
+### Що розгортається
+
+Namespace `marketplace`; Secret `marketplace-secrets` (`Opaque`, 11 ключів); Deployment `marketplace-api` (3 репліки); Service `NodePort` 80 → 30080, що kind через `extraPortMappings` віддає на `127.0.0.1:30080` хоста; PodDisruptionBudget `minAvailable = replicas - 1`; HorizontalPodAutoscaler `autoscaling/v2` (2..4 репліки, CPU 70%).
+
+У кластері працює не повний Nest-застосунок, а окремий вхід `src/k8s/server.ts` з того самого репозиторію й того самого образу. Повному застосунку потрібні Postgres, два Redis, RabbitMQ і S3, а Grading не піднімає їх поруч із кластером. Вхід не має зовнішніх залежностей і віддає лише `/healthz`, `/readyz` і `/products`: він існує, щоб показати життєвий цикл пода (прогрів, готовність, дренаж), а не бізнес-логіку. Повний застосунок запускається як раніше: `docker compose` і `npm run start:vault`.
+
+### Змінні
+
+Програма в `infra/` першою дією (до створення будь-якого ресурсу) перевіряє весь набір нижче й падає з переліком усіх відсутніх імен. Значень за замовчуванням у цього набору немає.
+
+| Змінна | Обов'язкова | Джерело | Опис |
+|--------|:-----------:|---------|------|
+| `DB_PASSWORD` | так | сховище: `secrets/db_password` через `scripts/with-secrets.sh` | Пароль БД. Єдиний ключ, який потрапляє в под (`secretKeyRef`); вхід `src/k8s/server.ts` вимагає його при старті |
+| `DATABASE_URL` | так (непорожня) | сховище: збирається обгорткою `with-secrets.sh` з `DB_*` | Рядок підключення. Под його не читає; лежить у Secret, щоб повний застосунок міг узяти той самий Secret |
+| `JWT_KID` | так | сховище: `secrets/jwt/<env>/kid` через `scripts/with-secrets.sh` | Ідентифікатор поточного ключа підпису |
+| `JWT_PRIVATE_KEY` | так | сховище: `secrets/jwt/<env>/private.pem` через `scripts/with-secrets.sh` | Приватний ключ ES256, PEM у base64 |
+| `JWT_PUBLIC_KEY` | так | сховище: `secrets/jwt/<env>/public.pem` через `scripts/with-secrets.sh` | Публічний ключ тієї ж пари, PEM у base64 |
+| `REFRESH_TOKEN_PEPPER` | так | сховище: `secrets/jwt/<env>/refresh_pepper` через `scripts/with-secrets.sh` | Pepper для HMAC refresh-токена |
+| `STORAGE_ACCESS_KEY` | так | сховище: `secrets/storage_access_key` через `scripts/with-secrets.sh` | Ключ доступу до S3-сумісного сховища |
+| `STORAGE_SECRET_KEY` | так | сховище: `secrets/storage_secret_key` через `scripts/with-secrets.sh` | Секретний ключ до S3-сумісного сховища |
+| `JWT_PREVIOUS_KID` | змінна має бути задана | сховище: `secrets/jwt/<env>/previous_kid` через `scripts/with-secrets.sh` | `kid` попереднього ключа. Порожнє значення означає «ротації немає», відсутня змінна означає «забули задати» і є помилкою |
+| `JWT_PREVIOUS_PUBLIC_KEY` | змінна має бути задана | сховище: `secrets/jwt/<env>/previous_public.pem` через `scripts/with-secrets.sh` | Публічний ключ попередньої пари; порожній поза ротацією |
+| `STORAGE_ENDPOINT` | змінна має бути задана | сховище або змінна оточення (дефолт обгортки `http://127.0.0.1:22650`) | Адреса S3-сумісного сховища; порожня означає справжній AWS S3 |
+
+Решта змінних не секретні й мають дефолти:
+
+| Змінна | Дефолт | Опис |
+|--------|--------|------|
+| `PULUMI_CONFIG_PASSPHRASE` | немає (береться з файла `secrets/pulumi_passphrase`, шаблон `secrets/pulumi_passphrase.example`) | Парольна фраза, якою Pulumi шифрує секрети у своєму стані. Без неї `scripts/pulumi.sh` відмовляється стартувати |
+| `PULUMI_BACKEND_URL` | `file://` + корінь репозиторію | Де лежить стан Pulumi. Файловий бекенд, акаунт Pulumi Cloud не потрібен. На Windows залиште незаданим: скрипт сам дає шлях через `pwd -W` |
+| `KUBE_CONTEXT` | `kind-hw28` | Контекст kubectl, який використовує провайдер |
+| `K8S_NAMESPACE` | `marketplace` | Namespace |
+| `IMAGE` | `marketplace-api:hw28` | Образ для Deployment |
+| `REPLICAS` | `3` | Від 2 до 10: одна репліка з PDB це самообман |
+| `ROLLOUT_PROFILE` | `zero` | `zero` (без втрат) або `naive` (контроль, див. нижче) |
+| `ROLLOUT_REV` | `1` | Позначка ревізії в шаблоні пода; зміна запускає rolling update |
+| `SCAN_MAX` | `7` | Скільки знахідок дозволено (див. «Сканування») |
+| `SCAN_SEVERITY` | `CRITICAL,HIGH` | Які рівні рахувати |
+| `SCAN_IGNORE_UNFIXED` | `1` | Не рахувати знахідки без виправлення в дистрибутиві |
+| `DEMO_MIN_REQUESTS` | `5000` | Мінімум запитів у `demo:rollout` |
+| `DEMO_CONCURRENCY` | `12` | Паралельних запитів у `demo:rollout` |
+| `DEMO_KEEPALIVE` | `1` | `0` вимикає keep-alive у навантаженні |
+
+Під час розробки значення з першої таблиці приходять через `bash scripts/with-secrets.sh dev …`. Без доступу до джерела (грейдер, чистий клон) їх експортують вручну разом із `SKIP_VAULT=1`, як у розділі «Grading».
+
+Перевірка, що відсутність будь-якої змінної з першої таблиці зупиняє розгортання й називає її (після експорту всього набору, як у «Grading»):
+
+    for v in DB_PASSWORD DATABASE_URL JWT_KID JWT_PRIVATE_KEY JWT_PUBLIC_KEY REFRESH_TOKEN_PEPPER STORAGE_ACCESS_KEY STORAGE_SECRET_KEY JWT_PREVIOUS_KID JWT_PREVIOUS_PUBLIC_KEY STORAGE_ENDPOINT; do
+      env -u "$v" bash scripts/pulumi.sh preview 2>&1 | grep -c "$v"
+    done
+
+Кожен рядок виводу має бути не нулем: ім'я змінної є в повідомленні про помилку.
+
+### Образ
+
+`docker/Dockerfile` має три стадії: `build` (повні залежності й `tsc`), `deps` (лише production-залежності) і `runtime` на `gcr.io/distroless/nodejs22-debian12:nonroot`. У runtime-стадію копіюються тільки `node_modules` з `deps`, `dist` з `build` і `package.json`. Distroless не має оболонки: `docker run --entrypoint sh` завершується кодом 127, і це свідома властивість (нема чим скористатися після зламу). Користувач заданий числом, `USER 65532:65532`, бо `runAsNonRoot` у Kubernetes не вміє зіставити ім'я з uid і відхиляє образ з `USER nonroot`.
+
+Секрет збірки (токен приватного реєстру) не проходить через `ARG`, `ENV` чи `COPY`. Він монтується лише на час одного `RUN` (`--mount=type=secret,id=npm_token`), а конфіг npm з посиланням `${NPM_TOKEN}` підключається bind-монтуванням (`docker/npmrc`). `npm run demo:image` доводить це виміром: збирає образ із випадковим токеном і шукає його в трьох місцях.
+
+| Ключ | Значення | Що означає |
+|------|:--------:|------------|
+| `stages` | 3 | Кількість `FROM` у Dockerfile |
+| `shell-inside` | 0 | Жодна оболонка в образі не запускається |
+| `runtime-uid` | 65532 | Не root |
+| `token-in-history` | 0 | Токена немає в `docker history` |
+| `token-in-config` | 0 | Токена немає в JSON-конфігу образу (його читаємо з `docker save`) |
+| `token-in-layers` | 0 | Токена немає в жодному шарі |
+
+Щоб нуль мав вагу, скрипт будує ще два навмисно зіпсовані образи (негативні контролі). Той, що передає токен через `ARG`, лишає його в історії й конфігу (по 2 входження, у шарах 0). Той, що копіює файл із токеном і видаляє його наступною командою, лишає файл у нижньому шарі (1 шар), хоч у фінальній файловій системі його нема. Ключі контролів називаються `control-arg-*` і `control-copy-*`, без префікса `token-in-`, щоб не змішуватися з вимірами.
+
+На Docker 29 з containerd image store `docker image inspect` не віддає історію, тому конфіг читається з розпакованого `docker save`; шари можуть бути gzip або zstd, обидва формати розпаковуються. Збірка йде з `--provenance=false`: без цього BuildKit додає до образу маніфест атестації, який плутає і сканер, і `kind load`.
+
+Кеш BuildKit не враховує вміст секрету в ключі кешу, тому `demo:image` збирає зі `--no-cache-filter build --no-cache-filter deps`, інакше повторний запуск із новим токеном узяв би старі шари й пропустив би перевірку.
+
+Кубернетівський Secret і секрет збірки вирішують різні задачі. Секрет збірки живе рівно один `RUN` і не залишає сліду в образі. Kubernetes Secret живе в кластері й подається поду під час запуску. Одне не замінює інше.
+
+### Сканування
+
+`npm run scan` запускає Trivy 0.76.1 у контейнері, закріпленому за тегом і digest. Закріплення за digest не прикраса: у березні 2026 року був скомпрометований ланцюг постачання самого Trivy (v0.69.4, CVE-2026-33634), і плаваючий тег `latest` у CI став би тією самою дірою, яку сканер має шукати. Вердикт рахується не сканером, а кодом у `scripts/lib/scan-gate.cjs` зі звіту JSON, тому поріг можна перевірити юніт-тестом (`test/unit/scan-gate.spec.ts`) без Docker.
+
+    SCAN_MAX=-1 npm run scan       # gate=fail, код виходу не 0
+    SCAN_MAX=99999 npm run scan    # gate=pass, код виходу 0
+    npm run scan                   # робочий поріг 7
+
+Вивід: `image=`, `severity=`, `found=` (з розбивкою за рівнями), `max-allowed=`, `gate=`. Робочий поріг 7 це «храповик»: знайдено рівно стільки, скільки є зараз, і будь-яка нова знахідка зламає CI (крок `image-scan` у `.github/workflows/ci.yml`). Цей поріг не означає «нуль вразливостей»: усі 7 знахідок (1 CRITICAL, 6 HIGH) це `libssl3 3.0.18-1~deb12u2` з базового образу distroless, тобто виправлення з'явиться з новою базою, а не з нашого коду. Залежності застосунку дали спочатку 13 знахідок; `npm update` у межах semver зняв частину, решту зняв `overrides` у `package.json`, що піднімає `multer` до 2.5.0 (`@nestjs/platform-express` 11.x пінить `multer` 2.4.0 точно, тож без `overrides` оновлення не доходить). Коли база оновиться, поріг варто знизити.
+
+### Розкочування без втрат
+
+Самого `RollingUpdate` для цього замало, потрібні разом усі налаштування нижче, і профіль `zero` (за замовчуванням) містить їх усі:
+
+| Налаштування | Значення | Навіщо |
+|--------------|----------|--------|
+| `maxUnavailable` | 0 | Старий под не знімається, доки новий не став `Ready`: готових подів ніколи не менше 3 |
+| `maxSurge` | 1 | Можна тимчасово мати 4 пода |
+| readiness-проба | `GET /readyz`, період 1 с, 2 невдачі | Трафік іде лише на под, який уже прогрівся |
+| liveness-проба | `GET /healthz`, затримка 15 с, період 10 с | Перезапускає завислий процес |
+| дренаж | `DRAIN_MS=5000` | Под, що завершується, ще 5 с обслуговує запити, доки kube-proxy прибирає його з Service |
+| `terminationGracePeriodSeconds` | 20 | Більше за дренаж плюс закриття сокета, інакше kubelet вб'є под раніше за `server.close()` |
+
+Readiness і liveness свідомо ходять на різні шляхи, бо відповідають на різні питання. «Чи готовий приймати трафік» (`/readyz`) стає 503 під час дренажу, і саме це знімає под із Service. «Чи живий процес» (`/healthz`) під час дренажу лишається 200: якби liveness теж падала, kubelet перезапустив би под, який чесно догрібає запити. Прогрів 4 с відбувається до `listen()`, тож до кінця прогріву порт закритий і проба нічого не отримує.
+
+Порядок при SIGTERM: `/readyz` стає 503 (запити й далі обслуговуються, відповіді мають `Connection: close`, щоб клієнти переходили на інші поди) → пауза дренажу → `server.close()` → вихід 0.
+
+`npm run demo:rollout` перевіряє це навантаженням: 12 паралельних потоків б'ють у `127.0.0.1:30080/products` (не `localhost`: на Windows він спершу пробує `::1`, і відмова триває близько 2 с). Скрипт спершу виставляє початкову ревізію й чекає, поки відповіді прийдуть від усіх реплік, потім стартує навантаження, через 2 с викликає `pulumi up` з новою `ROLLOUT_REV` (це і є rolling update), чекає `kubectl rollout status`, тримає навантаження ще 5 с і добирає до `DEMO_MIN_REQUESTS`. Код кожної відповіді дописується рядком у файл (`000` означає, що відповіді не було: обрив або таймаут 5 с), підсумок читається з файла. Ще скрипт рахує відповіді старої й нової ревізій і падає, якщо однієї з них нема: інакше оновлення пройшло б не під навантаженням, а `failed=0` нічого б не доводив. `rollout-seconds` це час від початку `pulumi up` до кінця `rollout status`, тобто з накладними витратами Pulumi.
+
+Результати (один прогін на моїй машині, числа трохи відрізняються від запуску до запуску):
+
+| Профіль | `requests` | `ok` | `failed` | `rollout-seconds` | Старих / нових відповідей |
+|---------|-----------:|-----:|---------:|------------------:|--------------------------:|
+| `zero` | 15388 | 15388 | 0 | 21,5 | 11618 / 3765 |
+| `naive` (контроль) | 5541 | 5393 | 148 | 8,4 | 5237 / 156 |
+
+Профіль `naive` (`ROLLOUT_PROFILE=naive npm run demo:rollout`) це навмисно погана конфігурація: `maxUnavailable: 25%`, без проб, без дренажу. Він потрібен як контроль: рахунок, який не вміє бачити втрати, нічого не доводить. Усі 148 втрат це `000`: новий под без готовності отримує трафік, поки ще прогрівається, а старий вмирає на півслові. Після контрольного прогону скрипт сам повертає кластер у `zero`.
+
+Про `docker stop`: у моєму Docker Desktop контейнер вбивався через ~3 с після SIGTERM замість стандартних 10 (причину не з'ясовано), тому дренаж у 5 с не встигав. `docker stop -t 10` дає чистий вихід із повним журналом. У Kubernetes цим керує `terminationGracePeriodSeconds`, який задано явно, тож проблема локальна для Docker Desktop.
+
+### PodDisruptionBudget
+
+PDB обмежує **добровільні** перерви: вивід вузла на обслуговування (`kubectl drain`), оновлення кластера. Він не захищає від збою вузла й від `kubectl delete pod`: видалення пода бюджет не питає. Лише Eviction API (`POST .../pods/<ім'я>/eviction`) перевіряє бюджет, і саме ним користується `drain`.
+
+`npm run demo:pdb` спершу чекає, поки всі репліки `Ready`, а `disruptionsAllowed >= 1` (інакше перший виклик міг би отримати 429 просто через відставання статусу), потім шле дві спроби виселення двом різним подам поспіль. З трьох подів і `minAvailable: 2` перша проходить (`201`), друга ні (`429`), бо один под уже пішов.
+
+    healthy=3
+    minAvailable=2
+    disruptions-allowed-before=1
+    evict-1=201
+    evict-2=429
+
+Коди читаються як HTTP-статуси відповіді API (через `kubectl proxy`), а не парсяться з тексту помилки kubectl. Наприкінці скрипт чекає, поки Deployment замінить виселений под, тож кластер лишається здоровим.
+
+`minAvailable = replicas - 1` має слабке місце: якщо HPA колись зменшить репліки до двох, бюджет `minAvailable: 2` дозволить нуль перерв, і `drain` зависне. У проді безпечніше `maxUnavailable: 1`, який не залежить від кількості реплік; тут лишено `minAvailable`, бо демо друкує саме його.
+
+### HPA і replicas
+
+HPA створено з `autoscaling/v2`: мінімум 2, максимум 4, ціль 70% завантаження CPU від `requests.cpu` (50m; без `requests` метрика Utilization не рахується). У kind немає metrics-server, тому `kubectl get hpa` показує `cpu: <unknown>/70%` і масштабування не відбувається: HPA тут оголошений і валідний, але ніколи не спрацьовує.
+
+Є конфлікт володіння полем `spec.replicas`. Якщо маніфест Deployment містить `replicas: 3`, а HPA теж керує кількістю реплік, то кожен `pulumi up` (він застосовує маніфест через server-side apply) заново виставляє 3 і скидає те, що HPA встановив за цей час: під навантаженням autoscaler піднімає до 4, наступний деплой повертає 3, потім autoscaler знову піднімає, і кожен деплой породжує зайве коливання. При server-side apply кожне поле має власника-менеджера. HPA пише кількість реплік через підресурс `scale` як інший менеджер, тож наступний apply або отримує конфлікт володіння, або (з прапорцем `force`, як застосовує Pulumi) забирає поле собі й затирає значення HPA. У реальному кластері з metrics-server правильно прибрати `replicas` з маніфесту, щоб поле належало лише HPA.
+
+У цьому проєкті `replicas` лишено в маніфесті свідомо: без metrics-server HPA нічого не зробить, і без явного `replicas` кластер лишився б з однією реплікою, а на одній репліці немає що розкочувати без простою й що виселяти. PDB і демо теж виходять із числа реплік. Це компроміс локального стенда, а не рекомендація для прод-кластера.
+
+### Секрети
+
+Значення секретів не потрапляють у маніфест Deployment: под отримує їх через `secretKeyRef`, у JSON Deployment є лише ім'я Secret і ключ. Перевірка (значення з вашого оточення не повинно знайтися):
+
+    kubectl -n marketplace get deploy marketplace-api -o json | grep -c "$DB_PASSWORD"
+
+Очікується `0`. Secret створюється з полем `data` у base64; `stringData` не використано. Важливо: base64 це кодування, не шифрування. Хто має право `get secret` у namespace, бачить значення, а ще вони видимі в `env` кожного, хто може зробити `exec` у под. Pulumi додатково позначає значення секретними (`pulumi.secret`), тому вони шифруються парольною фразою в стані й маскуються у виводі, але в самому кластері вони так само лише в base64, а шифрування в etcd (encryption at rest) це налаштування кластера, яке за замовчуванням вимкнене.
+
+Для прод-кластера значення не передають через Pulumi, а підтягують з менеджера секретів: External Secrets Operator синхронізує секрети із зовнішнього менеджера (Vault, AWS Secrets Manager) у Kubernetes Secret, а Secrets Store CSI Driver монтує значення в под напряму, мимо Secret. У обох випадках у репозиторії й у стані Pulumi залишається лише посилання на секрет.
+
+Файл стану Pulumi (`Pulumi.dev.yaml`) не комітиться (`infra/Pulumi.*.yaml` у `.gitignore`): він містить `encryptionsalt`, прив'язану до парольної фрази, з якою стек було створено, і на чужій фразі (як у грейдера) відкритися не зможе.
+
+### Відомі прогалини
+
+- Один вузол kind, `NodePort` замість Ingress, жодних NetworkPolicy.
+- Образ не підписаний і без SBOM; сканується лише його вміст на момент збірки.
+- Pod отримує тільки `DB_PASSWORD`; решта 10 ключів Secret лежить для повного застосунку, якого в кластері нема.
+- HPA без metrics-server не масштабує (див. вище); конфлікт `replicas` описано, але в цьому стенді не усунуто.
+- `rollout-seconds` включає накладні витрати Pulumi, тому завищений відносно чистого `kubectl rollout`.
+- Вимірювання зроблені одним прогоном на одній машині; числа в таблицях показують порядок величин, а не гарантію.
+- Версії інструментів закріплено, щоб плаваючі теги нічого не ламали: TypeScript в `infra/` `~5.9.3` (пікова залежність `@pulumi/pulumi` вимагає `typescript <7`, а в npm вже 7.x), Trivy за digest, kind і вузол Kubernetes за версіями вище.
+
 ## Структура
 
 | Шлях                          | Призначення                                      |
@@ -1269,7 +1484,7 @@ Presigned URL це bearer-токен: хто його має, той має до
 | `test/integration/`            | Integration-тести репозиторіїв і публікації `order.placed` з обох шляхів створення замовлення (`checkout.publish.spec.ts`) проти testcontainer-Postgres (TRUNCATE-ізоляція між тестами) |
 | `test/e2e/`                    | E2E-тести повного Nest-застосунку через supertest, без підміни провайдерів |
 | `jest.config.js`               | Multi-project конфіг Jest: `integration`, `e2e`, `contract` |
-| `Dockerfile` + `.dockerignore` | Production-образ застосунку (multi-stage), без секретів у шарах |
+| `docker/Dockerfile` + `.dockerignore` | Production-образ (три стадії, distroless nonroot), без секретів у шарах |
 | `rotate.sh`                    | Ротація пароля БД без рестарту (пам'ятай синхронно оновити `pgbouncer/userlist.txt`) |
 | `src/orders/order-events.service.ts` | Спільна шина подій (RxJS `Subject`) + буфер останніх подій для `Last-Event-ID` — одна на WS і SSE |
 | `src/orders/orders.gateway.ts` | WebSocket-gateway: автентифікація сокета при рукостисканні (токен, denylist), `join` з `userId` із токена та перевіркою права на замовлення, відключення за `exp`, кімнати `orders:<id>`, ретрансляція подій із шини |
@@ -1322,3 +1537,12 @@ Presigned URL це bearer-токен: хто його має, той має до
 | `src/edge-main.ts` | `npm run edge`: edge-кеш вручну |
 | `src/lib/` (`files-demo-kit.ts`, `multipart-client.ts`, `multipart-child.ts`, `multipart-runner.ts`, `offline-put*.ts`, `keyless-env.ts`, `net-probe.ts`) | Спільне для демо: очищення, дочірні процеси-клієнти, PUT без ключів, перевірка порту |
 | `secrets/storage_access_key`, `secrets/storage_secret_key` (+ `.example`) | Ключі сховища (перші два в `.gitignore`, `.example` це dev-шаблони) |
+| `docker/Dockerfile`, `docker/npmrc` | Три стадії, distroless nonroot (uid 65532), секрет збірки через `RUN --mount=type=secret` і конфіг npm з `${NPM_TOKEN}` |
+| `src/k8s/` | Вхід для кластера: `config.ts`, `lifecycle.ts`, `app.ts` (`/healthz`, `/readyz`, `/products`), `graceful.ts` (SIGTERM → дренаж → close), `server.ts` |
+| `infra/` | Pulumi-програма: `index.ts` (ресурси), `src/profiles.ts` (профілі `zero` і `naive`), `src/settings.ts` (валідація змінних першою дією), `Pulumi.yaml` |
+| `k8s/kind-config.yaml` | Конфіг kind-кластера `hw28`, `NodePort` 30080 на `127.0.0.1` хоста |
+| `scripts/cluster-up.sh`, `scripts/pulumi.sh` | `npm run cluster:up` і обгортка Pulumi (файловий бекенд, парольна фраза) |
+| `scripts/scan.mjs`, `scripts/lib/scan-gate.cjs` | `npm run scan`: Trivy за digest, вердикт власним кодом зі звіту |
+| `demo/image.mjs`, `demo/rollout.mjs`, `demo/pdb.mjs`, `demo/lib/` | `npm run demo:image`, `demo:rollout`, `demo:pdb` і їхня чиста логіка (підрахунок, вердикти) |
+| `secrets/pulumi_passphrase.example` | Шаблон парольної фрази Pulumi (реальний `secrets/pulumi_passphrase` у `.gitignore`) |
+| `test/unit/k8s.spec.ts`, `test/unit/infra-settings.spec.ts`, `test/unit/scan-gate.spec.ts`, `test/unit/rollout-stats.spec.ts`, `test/unit/pdb-logic.spec.ts` | Юніт-тести ДЗ №28: життєвий цикл пода, валідація змінних, поріг сканера, підрахунок rollout, вибір подів для виселення |
