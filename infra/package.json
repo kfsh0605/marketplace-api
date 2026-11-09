@@ -1,0 +1,16 @@
+{
+  "name": "marketplace-infra",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pulumi-програма курсового Marketplace для локального kind-кластера (ДЗ №28)",
+  "main": "index.ts",
+  "dependencies": {
+    "@pulumi/kubernetes": "^4.34.3",
+    "@pulumi/pulumi": "^3.274.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "ts-node": "^10.9.2",
+    "typescript": "~5.9.3"
+  }
+}

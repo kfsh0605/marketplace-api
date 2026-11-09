@@ -165,3 +165,7 @@ secrets/storage_secret_key
 
 .npm_token
 .pulumi/
+
+secrets/pulumi_passphrase
+infra/bin/
+infra/Pulumi.*.yaml
