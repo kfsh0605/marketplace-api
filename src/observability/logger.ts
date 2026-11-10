@@ -1,5 +1,6 @@
 import pino from 'pino';
 import { trace } from '@opentelemetry/api';
+import { getContext } from './request-context';
 
 const REDACT_PATHS = [
     'req.headers.authorization',
@@ -26,7 +27,10 @@ export const rootLogger = pino({
     },
     mixin() {
         const spanContext = trace.getActiveSpan()?.spanContext();
-        return spanContext ? { trace_id: spanContext.traceId, span_id: spanContext.spanId } : {};
+        return {
+            ...getContext(),
+            ...(spanContext ? { trace_id: spanContext.traceId, span_id: spanContext.spanId } : {}),
+        };
     },
     redact: {
         paths: REDACT_PATHS,
