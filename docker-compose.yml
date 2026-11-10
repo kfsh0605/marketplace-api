@@ -139,6 +139,60 @@ services:
       timeout: 5s
       retries: 10
 
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=1d
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "127.0.0.1:22901:9090"
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -q --spider http://127.0.0.1:9090/-/ready" ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  jaeger:
+    image: jaegertracing/jaeger:2.9.0
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:22904:16686"
+      - "127.0.0.1:22918:4318"
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -q --spider http://127.0.0.1:16686/" ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    restart: unless-stopped
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      jaeger:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-hw29-grafana-pass}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "127.0.0.1:22902:3000"
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -q --spider http://127.0.0.1:3000/api/health" ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
 volumes:
   pgdata:
   pact_broker_db_data:
