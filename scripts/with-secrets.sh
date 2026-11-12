@@ -82,4 +82,14 @@ if [ -f "$PULUMI_PASSPHRASE_FILE" ]; then
   export PULUMI_CONFIG_PASSPHRASE="$(tr -d '\r\n' < "$PULUMI_PASSPHRASE_FILE")"
 fi
 
+export OTEL_EXPORTER_OTLP_ENDPOINT="${OTEL_EXPORTER_OTLP_ENDPOINT:-http://127.0.0.1:22918}"
+export PROMETHEUS_URL="${PROMETHEUS_URL:-http://127.0.0.1:22901}"
+export TRACE_API_URL="${TRACE_API_URL:-http://127.0.0.1:22904}"
+export GRAFANA_ADMIN_USER="${GRAFANA_ADMIN_USER:-admin}"
+
+GRAFANA_PASSWORD_FILE="$ROOT/secrets/grafana_admin_password"
+if [ -f "$GRAFANA_PASSWORD_FILE" ]; then
+  export GRAFANA_ADMIN_PASSWORD="$(tr -d '\r\n' < "$GRAFANA_PASSWORD_FILE")"
+fi
+
 exec "$@"

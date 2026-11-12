@@ -169,3 +169,5 @@ secrets/storage_secret_key
 secrets/pulumi_passphrase
 infra/bin/
 infra/Pulumi.*.yaml
+secrets/grafana_admin_password
+
