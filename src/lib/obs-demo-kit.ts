@@ -102,6 +102,7 @@ export async function startObsServer(extraEnv: Record<string, string> = {}): Pro
             ...process.env,
             OTEL_EXPORTER_OTLP_ENDPOINT: process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? 'http://127.0.0.1:22918',
             ...extraEnv,
+            OTEL_SERVICE_NAME: 'marketplace-api',
             OBS_APP_PORT: String(port),
         },
         stdio: ['ignore', 'pipe', 'pipe'],

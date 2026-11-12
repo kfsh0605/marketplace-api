@@ -46,6 +46,7 @@
     "demo:rollout": "bash scripts/with-secrets.sh dev node demo/rollout.mjs",
     "demo:pdb": "node demo/pdb.mjs",
     "demo:logs": "bash scripts/with-secrets.sh dev node dist/demo-logs.js",
+    "demo:trace": "bash scripts/with-secrets.sh dev node dist/demo-trace.js",
     "demo:metrics": "bash scripts/with-secrets.sh dev node dist/demo-metrics.js",
     "rabbit:setup": "bash scripts/with-secrets.sh dev node dist/messaging/setup.js",
     "consumer": "bash scripts/with-secrets.sh dev node dist/messaging/run-consumer.js",
