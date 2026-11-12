@@ -39,6 +39,9 @@ export class OrdersRepository {
     findById(id: string): Promise<Order | undefined> {
         return inSpan('db.query orders.findById', async () => {
             await sleep(5 + Math.random() * 20);
+            if (id === 'slow') {
+                await sleep(400);
+            }
             if (id === 'boom') {
                 throw new Error('db connection lost');
             }

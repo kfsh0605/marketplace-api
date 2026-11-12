@@ -155,3 +155,44 @@ export async function startObsServer(extraEnv: Record<string, string> = {}): Pro
         },
     };
 }
+
+export interface Sample {
+    name: string;
+    labels: Record<string, string>;
+    value: number;
+}
+
+const SAMPLE_LINE = /^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{(.*)\})?\s+(\S+)/;
+const LABEL_PAIR = /([a-zA-Z_][a-zA-Z0-9_]*)="((?:[^"\\]|\\.)*)"/g;
+
+export function parseMetrics(text: string): Sample[] {
+    const samples: Sample[] = [];
+    for (const line of text.split('\n')) {
+        if (line.length === 0 || line[0] === '#') {
+            continue;
+        }
+        const match = SAMPLE_LINE.exec(line);
+        if (!match) {
+            continue;
+        }
+        const labels: Record<string, string> = {};
+        for (const pair of (match[2] ?? '').matchAll(LABEL_PAIR)) {
+            labels[pair[1]] = pair[2];
+        }
+        samples.push({ name: match[1], labels, value: Number(match[3]) });
+    }
+    return samples;
+}
+
+export async function scrape(port: number): Promise<Sample[]> {
+    const result = await request(port, 'GET', '/metrics');
+    return parseMetrics(result.body);
+}
+
+export function sumOf(
+    samples: Sample[],
+    name: string,
+    match: (labels: Record<string, string>) => boolean = () => true,
+): number {
+    return samples.filter((sample) => sample.name === name && match(sample.labels)).reduce((sum, sample) => sum + sample.value, 0);
+}
