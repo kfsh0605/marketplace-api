@@ -18,7 +18,7 @@ function readyPodNames(podList) {
 function pdbSnapshot(pdb) {
     return {
         healthy: pdb.status?.currentHealthy ?? 0,
-        minAvailable: pdb.spec?.minAvailable,
+        minAvailable: pdb.spec?.minAvailable ?? pdb.status?.desiredHealthy,
         disruptionsAllowed: pdb.status?.disruptionsAllowed ?? 0,
     };
 }

@@ -121,7 +121,7 @@ const pdb = new k8s.policy.v1.PodDisruptionBudget(
     'pdb',
     {
         metadata: { name: APP, namespace: namespace.metadata.name, labels },
-        spec: { minAvailable: settings.replicas - 1, selector: { matchLabels: labels } },
+        spec: { maxUnavailable: 1, selector: { matchLabels: labels } },
     },
     opts,
 );
@@ -144,5 +144,5 @@ export const namespaceName = namespace.metadata.name;
 export const profile = settings.profile;
 export const rev = settings.rev;
 export const nodePort = service.spec.ports[0].nodePort;
-export const pdbMinAvailable = pdb.spec.minAvailable;
+export const pdbMaxUnavailable = pdb.spec.maxUnavailable;
 export const hpaRange = pulumi.interpolate`${hpa.spec.minReplicas}-${hpa.spec.maxReplicas}`;

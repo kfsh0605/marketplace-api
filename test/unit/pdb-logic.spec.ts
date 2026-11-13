@@ -32,6 +32,14 @@ describe('pdb: знімок бюджету', () => {
         expect(snapshot).toEqual({ healthy: 3, minAvailable: 2, disruptionsAllowed: 1 });
     });
 
+    it('при maxUnavailable бере мінімум зі status.desiredHealthy', () => {
+        const snapshot = pdbSnapshot({
+            spec: { maxUnavailable: 1 },
+            status: { currentHealthy: 3, desiredHealthy: 2, disruptionsAllowed: 1 },
+        });
+        expect(snapshot).toEqual({ healthy: 3, minAvailable: 2, disruptionsAllowed: 1 });
+    });
+
     it('без статусу дає нулі, а не undefined', () => {
         expect(pdbSnapshot({ spec: { minAvailable: 2 } })).toEqual({ healthy: 0, minAvailable: 2, disruptionsAllowed: 0 });
     });
