@@ -1465,7 +1465,11 @@ HPA створено з `autoscaling/v2`: мінімум 2, максимум 4, 
 
 Дашборд: `http://127.0.0.1:22902`, папка Marketplace, «Marketplace API · RED» (логін і пароль із таблиці змінних нижче). Демо самі підіймають власний екземпляр застосунку на `:22911`, тому `obs:serve` потрібен лише для того, щоб дашборд побачив трафік.
 
-Ендпоінт, на якому все перевіряється, це оформлення замовлення `POST /orders/checkout` (поруч `GET /orders/:id`, `POST /auth/login`, `GET /metrics`). Це окремий застосунок зі шарами controller, service і repository в пам'яті (`src/obs-app/`): демо мають працювати в грейдера без Postgres і без секретів. Модулі `src/observability/*` (трасування, логер, контекст, метрики) від нього не залежать і підключаються до будь-якого Express/Nest-застосунку.
+Ендпоінт, на якому все перевіряється, це оформлення замовлення `POST /orders/checkout` (поруч `GET /orders/:id`, `POST /auth/login`, `GET /metrics`). Це окремий застосунок зі шарами controller, service і repository в пам'яті (`src/obs-app/`): демо мають працювати в грейдера без Postgres і без секретів. Модулі `src/observability/*` (трасування, логер, контекст, метрики, безпечний лог запиту) від нього не залежать.
+
+Той самий набір підключено й до справжнього Nest-сервісу. `src/main.ts` першим рядком імпортує `./observability/tracing` (інструментація має завантажитися раніше за `express` і `http`), а `configureObservability` (`src/observability/nest-setup.ts`) вмикає pino-логер Nest (`PinoNestLogger`), `/metrics`, контекст запиту, RED-middleware і лог запиту. Викликає її лише `main.ts`: e2e-тести й демо, що піднімають Nest у процесі через `configureApp`, лишаються без телеметрії. `ProblemExceptionFilter` для відповідей 5xx пише рядок `request failed` у лог (з `trace_id`) і ставить на span статус `ERROR`; раніше цей фільтр ловив усе й нічого не записував. Щоб Prometheus скрейпив справжній Nest замість `obs:serve`, запустіть його на порту 22910: `PORT=22910 node dist/main.js` з тими самими змінними, що в блоці Grading.
+
+**Справжній Nest (ручна перевірка).** Окремого демо для Nest немає, перевірено вручну на повному стенді з блоку Grading. Запити `/health` (з відомим `traceparent`), `/orders` без токена й неіснуючий шлях дали коди 200, 401 і 404. Рядків лога не в JSON `0`; рядки Nest мають `layer: nest` і поле `context`, а рядок запиту має той самий `trace_id`, що й заголовок. `/metrics` показав `http_requests_total{route="/health",status="200"} 2`, `{route="/orders",status="401"} 1` і `{route="unmatched",status="404"} 1` (скрейпи `/metrics` не рахуються). У Jaeger за цим `trace_id` знайдено `GET /health`, `request handler - /health` і middleware-span-и Express. Після зупинки pgbouncer `/health` відповів 503: у лозі з'явився рядок `request failed` з `trace_id`, span отримав `otel.status_code=ERROR`, а метрика `status="503"` зросла на одиницю. Юніт-тести (139) і e2e (41) лишилися зеленими.
 
 ### Змінні
 
@@ -1510,7 +1514,7 @@ HPA створено з `autoscaling/v2`: мінімум 2, максимум 4, 
 
 Кожне демо стартує з чистого стану (свіжий процес застосунку), друкує `key=number`, обчислює числа з реальних логів, метрик і span-ів, сама перевіряє інваріанти й завершується кодом ≠ 0 при порушенні. Кожне запущено тричі поспіль: вивід збігається побайтово (однаковий `md5sum` у трьох запусків).
 
-**`npm run demo:logs`: кореляція живе в контексті.** Один запит з власним `traceparent`, потім пачка з 12 однакових паралельних запитів (у кожного свій `traceparent`), потім логін із двома випадковими маркерами (у `Authorization: Bearer` і в `password`).
+**`npm run demo:logs`: кореляція живе в контексті.** Один запит з власним `traceparent`, потім пачка з 12 однакових паралельних запитів (у кожного свій `traceparent`), потім логін із п'ятьма випадковими маркерами: у `Authorization: Bearer`, у `password`, у вкладеному `user.password`, в заголовку `x-api-key` і в query-рядку `?token=`.
 
     non-json-lines=0
     layers=4
@@ -1522,7 +1526,7 @@ HPA створено з `autoscaling/v2`: мінімум 2, максимум 4, 
     secret-req-logged=1
     secret-in-logs=0
 
-`layers` це число різних полів `layer` (`http`, `orders.controller`, `orders.service`, `orders.repo`) у рядках одного запиту; `distinct-trace-ids` це число різних `trace_id` у тих самих рядках (рядок без `trace_id` рахується окремим значенням, тож втрачений контекст видно); `trace-id-matches-header` порівнює `trace_id` з trace-id заголовка, який ми відправили. `burst-trace-ids` це число груп рядків за `trace_id` після пачки, `burst-uneven` це число груп, чий розмір відрізняється від звичайного. Змінна «поточний запит» на рівні модуля дала б `burst-uneven > 0`; контекст, втрачений на колбеку, дав би рядок без `trace_id`. `secret-req-logged=1` потрібен, щоб «секретів немає» не вийшло просто через те, що запит не логується.
+`layers` це число різних полів `layer` (`http`, `orders.controller`, `orders.service`, `orders.repo`) у рядках одного запиту; `distinct-trace-ids` це число різних `trace_id` у тих самих рядках (рядок без `trace_id` рахується окремим значенням, тож втрачений контекст видно); `trace-id-matches-header` порівнює `trace_id` з trace-id заголовка, який ми відправили. `burst-trace-ids` це число груп рядків за `trace_id` після пачки, `burst-uneven` це різниця між найбільшою й найменшою групою (`max − min`): нуль означає, що кожен запит залишив однакову кількість рядків. Змінна «поточний запит» на рівні модуля дала б `burst-uneven > 0`; контекст, втрачений на колбеку, дав би рядок без `trace_id`. `secret-req-logged=1` потрібен, щоб «секретів немає» не вийшло просто через те, що запит не логується.
 
 **`npm run demo:metrics`: набір label-ів обмежений.** 60 успішних (серед них один повільний, ≈0,4 с) і 15 падінь (`GET /orders/boom` дає 500), потім 100 запитів із різними id.
 
@@ -1569,7 +1573,9 @@ JSON лежить у репозиторії (`observability/grafana/dashboards/r
 
 `trace_id` береться з активного span-а OpenTelemetry (`trace.getActiveSpan()` у `mixin` pino), своїх uuid немає. `userId`, `tenant` і `idempotencyKey` лежать в `AsyncLocalStorage`: контекст кладе middleware один раз на вході, `userId` дописує автентифікація. Жодна функція не отримує `req` заради логування.
 
-`redact` ховає значення за точними шляхами (`req.headers.authorization`, `req.body.password`, `req.body.refreshToken` та ін.) і не вгадує нічого поза списком. Перевірено вручну: `req.body.profile.token` на рівень глибше за `*.token`, і його значення потрапило в лог відкритим текстом. Тобто список шляхів пишуть руками, а демо перевіряє лише ті секрети, які відправляє.
+Лог запиту (`src/observability/request-log.ts`) працює за списком дозволеного, а не заборонного. У рядок потрапляють метод, шлях без query-рядка (`?token=…` не логується) і вісім заголовків: `traceparent`, `tracestate`, `x-tenant`, `idempotency-key`, `user-agent`, `content-type`, `content-length`, `accept`. Тіла запиту в логу немає взагалі: чого не записано, те не витече. `traceparent` у списку потрібен, бо `demo:trace` читає його з рядка логу.
+
+`redact` лишається другим рубежем для решти викликів `log.info({ ... })`. Він ховає значення за точними шляхами (`req.headers.authorization`, `req.body.password`, `req.body.refreshToken` та ін.) і не вгадує нічого поза списком: `req.body.profile.token` на рівень глибше за `*.token` потрапляло в лог відкритим текстом. Так само, через `body.user.password`, перша версія логу запиту протекла під час ревью: вона логувала весь `req.body`, а демо відправляло лише верхній `password`. Тепер демо підсовує п'ять маркерів (bearer, `password`, вкладений `user.password`, `x-api-key`, `?token=`) і перевіряє, що жоден не опинився в логах; на старому коді воно падало (`secret-in-logs=1`).
 
 `AsyncLocalStorage` губить контекст, коли колбек створено поза запитом, а виконує його інший цикл (пул з'єднань, listener зі старту, BullMQ-воркер). Лікує `bindToContext` (обгортка над `AsyncResource.bind`): прив'язаний колбек зберігає контекст запиту, непривʼязаний його втрачає.
 
@@ -1581,6 +1587,10 @@ JSON лежить у репозиторії (`observability/grafana/dashboards/r
 - Бонус із GlitchTip у цьому ДЗ не виконано.
 - Метрики процесу з `collectDefaultMetrics` збираються, але панелей для них немає (USE-питання розбирає лекція №30).
 - Вимірювання пам'яті й часу зроблені одним прогоном на одній машині; числа показують порядок величин.
+- У Nest-сервісі `userId` не потрапляє в контекст логів: `AuthGuard` його не пише, а після гарда в Nest немає рядка, де це було б видно. У `obs-app` `userId` є (хеш токена).
+- `/metrics` у Nest і в `obs-app` віддається на тому самому порту без автентифікації; у проді його закривають мережею (окремий порт або NetworkPolicy).
+- `main.ts` не викликає `flushTraces()` і `shutdownTracing()` при SIGTERM, тож span-и останніх ~500 мс (інтервал `BatchSpanProcessor`) при зупинці можуть не дійти; `obs-app/server.ts` це робить.
+- У Nest лишилися окремі `console.error` (пул Postgres, RabbitMQ): вони пишуть текстом, не JSON. На старті таких рядків немає (перевірено, 0), але при збоях вони з'являються.
 - Автентифікація в застосунку для демо спрощена: `userId` це перші вісім hex-символів SHA-256 від bearer-токена, замість перевірки JWT з ДЗ №24.
 
 ## Структура
@@ -1688,7 +1698,7 @@ JSON лежить у репозиторії (`observability/grafana/dashboards/r
 | `demo/image.mjs`, `demo/rollout.mjs`, `demo/pdb.mjs`, `demo/lib/` | `npm run demo:image`, `demo:rollout`, `demo:pdb` і їхня чиста логіка (підрахунок, вердикти) |
 | `secrets/pulumi_passphrase.example` | Шаблон парольної фрази Pulumi (реальний `secrets/pulumi_passphrase` у `.gitignore`) |
 | `test/unit/k8s.spec.ts`, `test/unit/infra-settings.spec.ts`, `test/unit/scan-gate.spec.ts`, `test/unit/rollout-stats.spec.ts`, `test/unit/pdb-logic.spec.ts` | Юніт-тести ДЗ №28: життєвий цикл пода, валідація змінних, поріг сканера, підрахунок rollout, вибір подів для виселення |
-| `src/observability/tracing.ts`, `logger.ts`, `request-context.ts`, `context.middleware.ts`, `metrics.ts` | OpenTelemetry SDK і експорт span-ів; pino з `mixin` (trace_id/span_id) і `redact`; контекст запиту в `AsyncLocalStorage`; метрики RED (`prom-client`) |
+| `src/observability/tracing.ts`, `logger.ts`, `request-context.ts`, `context.middleware.ts`, `metrics.ts`, `request-log.ts`, `nest-logger.ts`, `nest-setup.ts` | OpenTelemetry SDK і експорт span-ів; pino з `mixin` (trace_id/span_id) і `redact`; контекст запиту в `AsyncLocalStorage`; метрики RED (`prom-client`); лог запиту за списком дозволеного; логер Nest на pino і підключення всього цього до Nest (`configureObservability`, викликається з `main.ts`) |
 | `src/obs-app/` | Невеликий застосунок для демо Observability: controller, service і repository в пам'яті, `/metrics`, `/auth/login` |
 | `src/lib/obs-demo-kit.ts`, `src/lib/demo-client-env.ts` | Спільний код трьох демо: запуск застосунку, запити з `traceparent`, розбір логів і `/metrics` |
 | `src/demo-logs.ts`, `src/demo-metrics.ts`, `src/demo-trace.ts` | `npm run demo:logs`, `demo:metrics`, `demo:trace` |
