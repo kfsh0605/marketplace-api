@@ -1,3 +1,4 @@
+import './observability/tracing';
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
@@ -7,9 +8,15 @@ import { AppModule } from './app.module';
 import { configureApp } from './configure-app';
 import { buildSwaggerConfig } from './swagger-config';
 import { Env } from './config/env.schema';
+import { createLogger } from './observability/logger';
+import { configureObservability } from './observability/nest-setup';
+
+const log = createLogger('bootstrap');
 
 async function bootstrap() {
-    const app = await NestFactory.create(AppModule);
+    const app = await NestFactory.create(AppModule, { bufferLogs: true });
+
+    configureObservability(app);
 
     app.useWebSocketAdapter(new IoAdapter(app));
 
@@ -26,8 +33,8 @@ async function bootstrap() {
     const port = configService.get('PORT', { infer: true });
 
     await app.listen(port);
-    console.log(`Nest Marketplace API listening on http://localhost:${port}`);
-    console.log(`Swagger docs available on http://localhost:${port}/docs`);
+    log.info({ port }, 'Nest Marketplace API listening');
+    log.info({ docs: `http://localhost:${port}/docs` }, 'Swagger docs available');
 }
 
 bootstrap();
