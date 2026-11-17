@@ -1,7 +1,8 @@
 import express from 'express';
 import { requestContextMiddleware } from '../observability/context.middleware';
 import { metricsHandler, metricsMiddleware } from '../observability/metrics';
-import { authContext, errorHandler, requestLog } from './http-middleware';
+import { requestLog } from '../observability/request-log';
+import { authContext, errorHandler } from './http-middleware';
 import { createOrdersRouter } from './orders.controller';
 import { OrdersRepository } from './orders.repository';
 import { OrdersService } from './orders.service';
