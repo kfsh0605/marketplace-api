@@ -1530,7 +1530,6 @@
                     "instanceId": "",
                     "instanceOwnerId": "",
                     "localGatewayId": "",
-                    "natGatewayId": "",
                     "networkInterfaceId": "",
                     "odbNetworkArn": "",
                     "origin": "CreateRoute",
