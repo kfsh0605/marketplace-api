@@ -5,4 +5,5 @@ config:
       Project: nodejs-pro-hw31
       Stack: base
       ManagedBy: pulumi
+  hw31:budgetEmail: Kayfush@gmail.com
 encryptionsalt: v1:seqtfFulguY=:v1:3hVNl115ATj/PYaE:WZ21OAXL+L8gw2SL6N5Ea1ksfDsCBg==
