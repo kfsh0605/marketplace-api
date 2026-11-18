@@ -1,0 +1,3 @@
+name: hw31-base
+description: ДЗ №31, стек base - бюджет, сеть и IAM для CI. Ничего, что тарифицируется по часам.
+runtime: nodejs
