@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 _AWS_ENV_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-export HW31_REGION="${HW31_REGION:-eu-central-1}"
+export HW31_REGION="${HW31_REGION:-eu-north-1}"
 export AWS_DEFAULT_REGION="$HW31_REGION"
 export AWS_PAGER=""
 
