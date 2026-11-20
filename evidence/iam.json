@@ -1,0 +1,177 @@
+{
+  "roleArn": "arn:aws:iam::816142838493:role/hw31-ci-teardown",
+  "trustPolicy": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Sid": "CiUser",
+        "Effect": "Allow",
+        "Principal": {
+          "AWS": "arn:aws:iam::816142838493:user/hw31-ci"
+        },
+        "Action": [
+          "sts:AssumeRole",
+          "sts:TagSession"
+        ]
+      }
+    ]
+  },
+  "permissionsPolicy": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Action": [
+          "s3:ListBucket",
+          "s3:GetBucketLocation"
+        ],
+        "Effect": "Allow",
+        "Resource": "arn:aws:s3:::hw31-pulumi-state-816142838493",
+        "Sid": "StateBucketList"
+      },
+      {
+        "Action": [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject"
+        ],
+        "Effect": "Allow",
+        "Resource": "arn:aws:s3:::hw31-pulumi-state-816142838493/*",
+        "Sid": "StateBucketObjects"
+      },
+      {
+        "Action": [
+          "tag:GetResources",
+          "rds:DescribeDBInstances",
+          "elasticloadbalancing:DescribeLoadBalancers",
+          "ec2:DescribeNatGateways",
+          "ec2:DescribeAddresses"
+        ],
+        "Condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": [
+              "eu-north-1",
+              "us-east-1"
+            ]
+          }
+        },
+        "Effect": "Allow",
+        "Resource": "*",
+        "Sid": "EmptinessChecks"
+      },
+      {
+        "Action": [
+          "iam:ListOpenIDConnectProviders"
+        ],
+        "Effect": "Allow",
+        "Resource": "*",
+        "Sid": "ScpEvidence"
+      },
+      {
+        "Action": [
+          "rds:DeleteDBInstance",
+          "rds:ModifyDBInstance",
+          "rds:ListTagsForResource",
+          "rds:DescribeDBSubnetGroups",
+          "rds:DeleteDBSubnetGroup"
+        ],
+        "Condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": [
+              "eu-north-1",
+              "us-east-1"
+            ]
+          }
+        },
+        "Effect": "Allow",
+        "Resource": "*",
+        "Sid": "DestroyDatabase"
+      },
+      {
+        "Action": [
+          "elasticloadbalancing:DeleteLoadBalancer",
+          "elasticloadbalancing:DescribeLoadBalancerAttributes",
+          "elasticloadbalancing:ModifyLoadBalancerAttributes",
+          "elasticloadbalancing:DescribeTags",
+          "elasticloadbalancing:DescribeListeners",
+          "elasticloadbalancing:DescribeListenerAttributes",
+          "elasticloadbalancing:DeleteListener",
+          "elasticloadbalancing:DescribeTargetGroups",
+          "elasticloadbalancing:DescribeTargetGroupAttributes",
+          "elasticloadbalancing:DescribeTargetHealth",
+          "elasticloadbalancing:DeregisterTargets",
+          "elasticloadbalancing:DeleteTargetGroup"
+        ],
+        "Condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": [
+              "eu-north-1",
+              "us-east-1"
+            ]
+          }
+        },
+        "Effect": "Allow",
+        "Resource": "*",
+        "Sid": "DestroyLoadBalancer"
+      },
+      {
+        "Action": [
+          "lambda:GetFunction",
+          "lambda:ListVersionsByFunction",
+          "lambda:GetPolicy",
+          "lambda:RemovePermission",
+          "lambda:DeleteFunction"
+        ],
+        "Condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": [
+              "eu-north-1",
+              "us-east-1"
+            ]
+          }
+        },
+        "Effect": "Allow",
+        "Resource": "*",
+        "Sid": "DestroyLambdaTarget"
+      },
+      {
+        "Action": [
+          "ec2:DeleteNatGateway",
+          "ec2:ReleaseAddress",
+          "ec2:DisassociateAddress",
+          "ec2:DescribeAddressesAttribute",
+          "ec2:DeleteRoute",
+          "ec2:DescribeRouteTables",
+          "ec2:DescribeNetworkInterfaces",
+          "ec2:DescribeTags"
+        ],
+        "Condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": [
+              "eu-north-1",
+              "us-east-1"
+            ]
+          }
+        },
+        "Effect": "Allow",
+        "Resource": "*",
+        "Sid": "DestroyNat"
+      }
+    ]
+  },
+  "ciUser": {
+    "arn": "arn:aws:iam::816142838493:user/hw31-ci",
+    "permissionsPolicy": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Action": [
+            "sts:AssumeRole",
+            "sts:TagSession"
+          ],
+          "Effect": "Allow",
+          "Resource": "arn:aws:iam::816142838493:role/hw31-ci-teardown"
+        }
+      ]
+    }
+  }
+}

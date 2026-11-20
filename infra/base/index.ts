@@ -1,5 +1,6 @@
 import * as aws from "@pulumi/aws";
 import * as pulumi from "@pulumi/pulumi";
+import { createCiAccess } from "./src/ci-access";
 
 const cfg = new pulumi.Config("hw31");
 
@@ -171,6 +172,43 @@ new aws.vpc.SecurityGroupEgressRule("app-postgres-to-db", {
   description: "PostgreSQL to the database group only",
 });
 
+// ---------------------------------------------------------------------------
+// 4. IAM. Доступ для CI (пользователь hw31-ci + роль hw31-ci-teardown) и роль для Lambda.
+//
+// Роль Lambda лежит здесь, в base, а не в demo: её создаёт админ с ноутбука,
+// а ночная уборка в CI только сносит функцию и в IAM не заходит вовсе.
+// Это позволяет не давать роли CI ни одного права iam:*.
+// Роль бесплатная, у неё нет политик: Lambda ничего не пишет в логи, и лог-группа
+// (которая осталась бы после уборки и копила бы хранение) не появляется.
+// ---------------------------------------------------------------------------
+const githubRepo = cfg.require("githubRepo");
+const accountIdForNames = aws.getCallerIdentityOutput({}).accountId;
+
+// Доступ CI: пользователь hw31-ci (может только взять роль) и роль hw31-ci-teardown.
+// Подробности и причины - в src/ci-access.ts. Флаги:
+//   hw31:ciOidc          - добавить в доверие роли блок GitHub OIDC (если AWS его не примет, выключить)
+//   hw31:ciOidcProvider  - создавать сам OIDC-провайдер (на Free plan запрещено, оставить выключенным)
+const ci = createCiAccess({
+  githubRepo,
+  branches: ["main", "hw-31"],
+  regions: ["eu-north-1", "us-east-1"],
+  accountId: accountIdForNames,
+  stateBucketName: pulumi.interpolate`hw31-pulumi-state-${accountIdForNames}`,
+  oidcTrust: cfg.getBoolean("ciOidc") ?? false,
+  oidcProvider: cfg.getBoolean("ciOidcProvider") ?? false,
+});
+
+const lambdaRole = new aws.iam.Role("lambda-exec", {
+  name: "hw31-lambda-exec",
+  description: "Execution role for the ALB target Lambda in the demo stack; no policies",
+  assumeRolePolicy: JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [
+      { Effect: "Allow", Principal: { Service: "lambda.amazonaws.com" }, Action: "sts:AssumeRole" },
+    ],
+  }),
+});
+
 // Справочные data source: ничего не создают, показывают, под кем и где работаем.
 const identity = aws.getCallerIdentityOutput({});
 const region = aws.getRegionOutput({});
@@ -186,3 +224,8 @@ export const privateRouteTableId = privateRt.id;
 export const edgeSgId = edgeSg.id;
 export const appSgId = appSg.id;
 export const dbSgId = dbSg.id;
+export const ciUserName = ci.user.name;
+export const ciUserArn = ci.user.arn;
+export const ciRoleArn = ci.role.arn;
+export const ciRoleName = ci.role.name;
+export const lambdaRoleArn = lambdaRole.arn;
