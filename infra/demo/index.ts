@@ -51,7 +51,7 @@ const subnetGroup = new aws.rds.SubnetGroup("db", {
   subnetIds: privateSubnetIds,
 });
 
-export const db = new aws.rds.Instance("db", {
+const db = new aws.rds.Instance("db", {
   identifier: "hw31-demo-db",
   engine: "postgres",
   engineVersion: cfg.get("pgVersion") ?? "17",
@@ -125,7 +125,7 @@ new aws.lb.TargetGroupAttachment(
   { dependsOn: [invokePermission] },
 );
 
-export const alb = new aws.lb.LoadBalancer("alb", {
+const alb = new aws.lb.LoadBalancer("alb", {
   name: "hw31-demo-alb",
   loadBalancerType: "application",
   internal: false,
@@ -168,4 +168,4 @@ export const targetGroupArn = targetGroup.arn;
 export const dbIdentifier = db.identifier;
 export const dbEndpoint = db.address;
 export const natEnabled = withNat;
-export const natGateway = natGatewayId;
+export const natGateway = natGatewayId ?? "none";

@@ -1,0 +1,68 @@
+name: teardown
+
+# Ночная уборка стека demo и проверка, что в AWS ничего не осталось.
+# Запускается по расписанию (02:00 UTC, только из ветки main) и вручную (workflow_dispatch).
+#
+# Вход в AWS: OIDC на Free plan недоступен (политика организации запрещает iam:*Provider*),
+# поэтому используется ключ IAM-пользователя hw31-ci. Ключ лежит ТОЛЬКО в секретах Environment
+# "teardown" (CI_KEY_ID, CI_KEY_SECRET). Пользователь умеет единственное: взять роль
+# hw31-ci-teardown, а вся работа идёт под ролью. Триггеры, которые отдают секреты коду
+# из чужих форков, здесь не используются: только расписание и ручной запуск.
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # id-token: write нужен для OIDC. Сейчас вход идёт по ключу, но доверие к GitHub OIDC
+  # описано в роли и включится, когда AWS разрешит провайдера.
+  id-token: write
+
+concurrency:
+  group: teardown
+  cancel-in-progress: false
+
+jobs:
+  teardown:
+    runs-on: ubuntu-latest
+    environment: teardown
+    timeout-minutes: 60
+    env:
+      PULUMI_VERSION: 3.274.1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+
+      - name: Install Pulumi
+        run: |
+          curl -fsSL https://get.pulumi.com | sh -s -- --version "$PULUMI_VERSION"
+          echo "$HOME/.pulumi/bin" >> "$GITHUB_PATH"
+
+      - name: Configure AWS credentials (key of hw31-ci -> role hw31-ci-teardown)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          aws-access-key-id: ${{ secrets.CI_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.CI_KEY_SECRET }}
+          role-to-assume: arn:aws:iam::816142838493:role/hw31-ci-teardown
+          role-session-name: hw31-teardown-${{ github.run_id }}
+          role-duration-seconds: 3600
+          aws-region: eu-north-1
+
+      - name: Who am I (the assumed role must be in the log)
+        run: aws sts get-caller-identity
+
+      # Доказательство, что OIDC закрыт именно политикой организации, а не нашей ошибкой.
+      # У роли есть право iam:ListOpenIDConnectProviders, но AWS отвечает explicit deny
+      # in a service control policy. Шаг не должен ронять джоб.
+      - name: Proof - OIDC providers are blocked by a service control policy
+        continue-on-error: true
+        run: aws iam list-open-id-connect-providers 2>&1 || true
+
+      - name: Teardown demo, then prove the account is empty
+        run: bash scripts/teardown.sh
