@@ -191,7 +191,7 @@ const accountIdForNames = aws.getCallerIdentityOutput({}).accountId;
 const ci = createCiAccess({
   githubRepo,
   branches: ["main", "hw-31"],
-  regions: ["eu-north-1", "us-east-1"],
+  regions: ["eu-north-1"],
   accountId: accountIdForNames,
   stateBucketName: pulumi.interpolate`hw31-pulumi-state-${accountIdForNames}`,
   oidcTrust: cfg.getBoolean("ciOidc") ?? false,

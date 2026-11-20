@@ -13,6 +13,25 @@
           "sts:AssumeRole",
           "sts:TagSession"
         ]
+      },
+      {
+        "Sid": "GithubOidc",
+        "Effect": "Allow",
+        "Principal": {
+          "Federated": "arn:aws:iam::816142838493:oidc-provider/token.actions.githubusercontent.com"
+        },
+        "Action": "sts:AssumeRoleWithWebIdentity",
+        "Condition": {
+          "StringEquals": {
+            "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+          },
+          "StringLike": {
+            "token.actions.githubusercontent.com:sub": [
+              "repo:kfsh0605/marketplace-api:ref:refs/heads/main",
+              "repo:kfsh0605/marketplace-api:ref:refs/heads/hw-31"
+            ]
+          }
+        }
       }
     ]
   },
@@ -49,8 +68,7 @@
         "Condition": {
           "StringEquals": {
             "aws:RequestedRegion": [
-              "eu-north-1",
-              "us-east-1"
+              "eu-north-1"
             ]
           }
         },
@@ -77,8 +95,7 @@
         "Condition": {
           "StringEquals": {
             "aws:RequestedRegion": [
-              "eu-north-1",
-              "us-east-1"
+              "eu-north-1"
             ]
           }
         },
@@ -104,8 +121,7 @@
         "Condition": {
           "StringEquals": {
             "aws:RequestedRegion": [
-              "eu-north-1",
-              "us-east-1"
+              "eu-north-1"
             ]
           }
         },
@@ -124,8 +140,7 @@
         "Condition": {
           "StringEquals": {
             "aws:RequestedRegion": [
-              "eu-north-1",
-              "us-east-1"
+              "eu-north-1"
             ]
           }
         },
@@ -147,8 +162,7 @@
         "Condition": {
           "StringEquals": {
             "aws:RequestedRegion": [
-              "eu-north-1",
-              "us-east-1"
+              "eu-north-1"
             ]
           }
         },
