@@ -52,6 +52,7 @@
     "demo:alb": "bash scripts/with-secrets.sh dev bash scripts/demo-alb.sh",
     "demo:failover": "bash scripts/with-secrets.sh dev bash scripts/demo-failover.sh",
     "demo:nat": "bash scripts/with-secrets.sh dev bash scripts/demo-nat.sh",
+    "prices": "bash scripts/with-secrets.sh dev bash scripts/prices.sh",
     "evidence:base": "bash scripts/with-secrets.sh dev bash scripts/evidence-base.sh",
     "evidence:iam": "bash scripts/with-secrets.sh dev bash scripts/evidence-iam.sh",
     "ci:env": "bash scripts/with-secrets.sh dev bash scripts/ci-secrets.sh env",
