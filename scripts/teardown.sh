@@ -57,6 +57,11 @@ check() { # <имя> <функция>
   else
     RESULTS+="$name=${value:-unknown} FAIL"$'\n'
     FAILED=1
+    if [ "$name" = "tagged-resources-left" ]; then
+      echo "leftover-tagged-arns:"
+      aws resourcegroupstaggingapi get-resources --tag-filters Key=Project,Values=nodejs-pro-hw31 Key=Stack,Values=demo \
+        --query 'ResourceTagMappingList[].ResourceARN' --output text 2>&1 | tr '\t' '\n' | tr -d '\r'
+    fi
   fi
 }
 

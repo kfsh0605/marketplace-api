@@ -4,6 +4,8 @@
 set -euo pipefail
 export MSYS_NO_PATHCONV=1
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# node.exe - программа Windows: ей нужен путь вида C:/..., а не /c/... (pwd -W даёт его в Git Bash)
+ROOT_NATIVE="$(cd "$ROOT" && { pwd -W 2>/dev/null || pwd; })"
 source "$ROOT/scripts/lib/aws-env.sh"
 
 DB=hw31-demo-db
@@ -43,5 +45,5 @@ done
 
 LINES="$(printf 'standby-az-before=%s\naz-before=%s\naz-after=%s\nfailover-seconds=%s\nevent=%s' "$STANDBY" "$AZ_BEFORE" "$AZ_AFTER" "$SECONDS_TOTAL" "$EVENT")"
 printf '%s\n' "$LINES"
-printf '%s\n' "$LINES" | node "$ROOT/scripts/lib/demos-write.mjs" demo:failover
+printf '%s\n' "$LINES" | node "$ROOT_NATIVE/scripts/lib/demos-write.mjs" demo:failover
 [ "$AZ_BEFORE" != "$AZ_AFTER" ]

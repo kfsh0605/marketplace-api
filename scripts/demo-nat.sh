@@ -6,6 +6,8 @@
 set -euo pipefail
 export MSYS_NO_PATHCONV=1
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# node.exe - программа Windows: ей нужен путь вида C:/..., а не /c/... (pwd -W даёт его в Git Bash)
+ROOT_NATIVE="$(cd "$ROOT" && { pwd -W 2>/dev/null || pwd; })"
 source "$ROOT/scripts/lib/aws-env.sh"
 PULUMI="$ROOT/scripts/pulumi-aws.sh"
 
@@ -51,4 +53,4 @@ HOURS="$(MINUTES="$MINUTES" node -e 'process.stdout.write(String(Math.max(1,Math
 
 LINES="$(printf 'nat-gateway=%s\nnat-state-up=%s\nprivate-default-route-via-nat=%s\nnat-minutes=%s\nnat-billed-hours=%s' "$NAT_ID" "$NAT_STATE" "$VIA_NAT" "$MINUTES" "$HOURS")"
 printf '%s\n' "$LINES"
-printf '%s\n' "$LINES" | node "$ROOT/scripts/lib/demos-write.mjs" demo:nat
+printf '%s\n' "$LINES" | node "$ROOT_NATIVE/scripts/lib/demos-write.mjs" demo:nat

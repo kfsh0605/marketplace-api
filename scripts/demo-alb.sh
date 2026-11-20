@@ -4,6 +4,8 @@
 set -euo pipefail
 export MSYS_NO_PATHCONV=1
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# node.exe - программа Windows: ей нужен путь вида C:/..., а не /c/... (pwd -W даёт его в Git Bash)
+ROOT_NATIVE="$(cd "$ROOT" && { pwd -W 2>/dev/null || pwd; })"
 source "$ROOT/scripts/lib/aws-env.sh"
 
 OUTPUTS="$(bash "$ROOT/scripts/pulumi-aws.sh" demo outputs | tr -d '\r')"
@@ -30,5 +32,5 @@ done
 BODY="$(curl -s --max-time 10 "http://$ALB_DNS/" | tr -d '\r' || true)"
 LINES="$(printf 'alb-dns=%s\nhttp-code=%s\ntarget-state=%s\nbody=%s' "$ALB_DNS" "$HTTP_CODE" "$STATE" "$BODY")"
 printf '%s\n' "$LINES"
-printf '%s\n' "$LINES" | node "$ROOT/scripts/lib/demos-write.mjs" demo:alb
+printf '%s\n' "$LINES" | node "$ROOT_NATIVE/scripts/lib/demos-write.mjs" demo:alb
 [ "$HTTP_CODE" = "200" ] && [ "$STATE" = "healthy" ]
