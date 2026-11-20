@@ -1,0 +1,8 @@
+name: teardown
+on:
+  workflow_dispatch:
+jobs:
+  stub:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "stub, the real workflow lives in branch hw-31"
