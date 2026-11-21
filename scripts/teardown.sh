@@ -11,7 +11,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/scripts/lib/aws-env.sh" || exit 1
 
 STATE_FILE="$(mktemp)"
-trap 'rm -f "$STATE_FILE"' EXIT
+IGNORED_FILE="$(mktemp)"
+trap 'rm -f "$STATE_FILE" "$IGNORED_FILE"' EXIT
 
 echo "::group::pulumi destroy (stack demo)"
 bash "$ROOT/scripts/pulumi-aws.sh" demo destroy
@@ -28,9 +29,28 @@ count_state() {
     process.stdout.write(String(rs.filter((r) => !r.type.startsWith("pulumi:")).length));
   ' "$STATE_FILE"
 }
+# Удалённый NAT-шлюз AWS ещё долго (больше часа) показывает в API тегов как запись
+# в состоянии "deleted": ресурса уже нет, он не тарифицируется, но тег-API его помнит.
+# Поэтому шлюзы в состоянии deleted (или уже не найденные в EC2) не считаются остатком;
+# каждый такой пропуск печатается в лог. Любой другой ресурс и любая неопределённость - остаток.
 count_tagged() {
-  aws resourcegroupstaggingapi get-resources --tag-filters Key=Project,Values=nodejs-pro-hw31 Key=Stack,Values=demo \
-    --query 'length(ResourceTagMappingList)' --output text
+  local arns arn id out left=0
+  arns="$(aws resourcegroupstaggingapi get-resources --tag-filters Key=Project,Values=nodejs-pro-hw31 Key=Stack,Values=demo \
+    --query 'ResourceTagMappingList[].ResourceARN' --output text | tr '\t' '\n' | tr -d '\r')" || return 1
+  for arn in $arns; do
+    case "$arn" in
+      arn:aws:ec2:*:natgateway/*)
+        id="${arn##*/}"
+        out="$(aws ec2 describe-nat-gateways --nat-gateway-ids "$id" --query 'NatGateways[0].State' --output text 2>&1 | tr -d '\r')"
+        if [ "$out" = "deleted" ] || printf '%s' "$out" | grep -q 'NatGatewayNotFound'; then
+          echo "$id (EC2 state: ${out%%$'\n'*})" >> "$IGNORED_FILE"
+          continue
+        fi
+        ;;
+    esac
+    left=$((left + 1))
+  done
+  printf '%s' "$left"
 }
 count_rds() { aws rds describe-db-instances --query 'length(DBInstances)' --output text; }
 count_alb() { aws elbv2 describe-load-balancers --query 'length(LoadBalancers)' --output text; }
@@ -77,6 +97,11 @@ echo "::endgroup::"
 echo "================ teardown contract ================"
 echo "account=$HW31_ACCOUNT_ID region=$HW31_REGION run=${GITHUB_RUN_ID:-local}"
 printf '%s' "$RESULTS"
+if [ -s "$IGNORED_FILE" ]; then
+  while read -r line; do
+    echo "ignored-deleted-nat-gateway=$line: tombstone of a deleted gateway in the tagging API, not a live resource, not billed"
+  done < "$IGNORED_FILE"
+fi
 echo "us-east-1-checks=skipped (explicit deny by the organization policy on this Free plan account)"
 if [ "$FAILED" = "0" ] && [ "$DESTROY_RC" = "0" ]; then
   echo "teardown-result=OK"
