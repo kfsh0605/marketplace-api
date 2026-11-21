@@ -10,3 +10,12 @@ az-before=eu-north-1b
 az-after=eu-north-1a
 failover-seconds=416
 event=Multi-AZ instance failover completed
+
+## demo:nat
+# Значения перенесены из вывода первого реального запуска npm run demo:nat:
+# позже раздел пропал из файла при повторных замерах ALB и failover, а повторно NAT не поднимали.
+nat-gateway=nat-050106da9f36360de
+nat-state-up=available
+private-default-route-via-nat=1
+nat-minutes=3
+nat-billed-hours=1
