@@ -1,0 +1,37 @@
+# Ставки AWS, регион eu-north-1, собраны 2026-11-21T00:47Z через aws pricing get-products
+ALB | EUN1-LCUUsage | ELB:Balancing | 0.0076000000 USD / LCU-Hrs | $0.0076 per used Application load balancer capacity unit-hour (or partial hour) | прайс-лист от 2026-11-19T22:27:09Z
+ALB | EUN1-Outposts-LoadBalancerUsage | ELB:Balancing | 0.0239400000 USD / Hrs | $0.02394 per Hrs for Outposts-LoadBalancerUsage:LoadBalancing:Application in EU (Stockholm) | прайс-лист от 2026-11-19T22:27:09Z
+ALB | EUN1-LoadBalancerUsage | ELB:Balancing | 0.0239400000 USD / Hrs | $0.02394 per Application LoadBalancer-hour (or partial hour) | прайс-лист от 2026-11-19T22:27:09Z
+ALB | EUN1-TS-LoadBalancerUsage | ELB:Balancing | 0.0053000000 USD / Hrs | $0.0053 per associated Application load balancer Trust Store unit-hour  | прайс-лист от 2026-11-19T22:27:09Z
+ALB | EUN1-Outposts-LCUUsage | ELB:Balancing | 0.0000000000 USD / LCU-Hrs | $0.0 per LCU-Hrs for Outposts-LCUUsage:LoadBalancing:Application in EU (Stockholm) | прайс-лист от 2026-11-19T22:27:09Z
+ALB | EUN1-ReservedLCUUsage | ELB:Balancing | 0.0076000000 USD / ReservedLCU-Hr | $0.0076 per reserved Application load balancer capacity unit-hour | прайс-лист от 2026-11-19T22:27:09Z
+RDS Multi-AZ db.t4g.micro PostgreSQL | EUN1-Multi-AZUsage:db.t4g.micro | db.t4g.micro | 0.0330000000 USD / Hrs | $ 0.033 per RDS db.t4g.micro Multi-AZ instance hour (or partial hour) running PostgreSQL | прайс-лист от 2026-11-20T22:46:19Z
+RDS хранилище Multi-AZ | EUN1-RDS:Multi-AZ-GP3-Storage | General Purpose-GP3 | 0.2400000000 USD / GB-Mo | $0.24 per GB-month of provisioned GP3 storage for Multi-AZ deployments running PostgreSQL | прайс-лист от 2026-11-20T22:46:19Z
+NAT | EUN1-RegionalNatGateway-Hours | NGW:NatGateway | 0.0460000000 USD / Hrs | $0.046 per Regional NAT Gateway Hour (TransitGatewayConnect) | прайс-лист от 2026-11-20T22:10:40Z
+NAT | EUN1-RegionalNatGateway-Bytes | NGW:NatGateway | 0.0460000000 USD / GB | $0.046 per GB data processed by Regional NAT Gateways (CloudWANDirectConnect) | прайс-лист от 2026-11-20T22:10:40Z
+NAT | EUN1-RegionalNatGateway-Bytes | NGW:NatGateway | 0.0460000000 USD / GB | $0.046 per GB data processed by Regional NAT Gateways (TransitGatewayVPC) | прайс-лист от 2026-11-20T22:10:40Z
+NAT | EUN1-RegionalNatGateway-Hours | NGW:NatGateway | 0.0460000000 USD / Hrs | $0.046 per Regional NAT Gateway Hour (TransitGatewayConcentratorVPN) | прайс-лист от 2026-11-20T22:10:40Z
+NAT | EUN1-RegionalNatGateway-Hours | NGW:NatGateway | 0.0460000000 USD / Hrs | Hourly charge for Regional NAT Gateways | прайс-лист от 2026-11-20T22:10:40Z
+NAT | EUN1-RegionalNatGateway-Hours | NGW:NatGateway | 0.0460000000 USD / Hrs | $0.046 per Regional NAT Gateway Hour (CloudWANConnect) | прайс-лист от 2026-11-20T22:10:40Z
+NAT | EUN1-RegionalNatGateway-Bytes | NGW:NatGateway | 0.0460000000 USD / GB | $0.046 per GB data processed by Regional NAT Gateways (CloudWANVPC) | прайс-лист от 2026-11-20T22:10:40Z
+NAT | EUN1-NatGateway-Hours | NGW:NatGateway | 0.0460000000 USD / Hrs | $0.046 per NAT Gateway Hour | прайс-лист от 2026-11-20T22:10:40Z
+NAT | EUN1-NatGateway-Prvd-Gbps | NGW:NatGateway | 1.1060000000 USD / Gbps-hrs | $1.106 per Gbps-hour of NAT Gateways with Provisioned Bandwidth | прайс-лист от 2026-11-20T22:10:40Z
+NAT | EUN1-RegionalNatGateway-Hours | NGW:NatGateway | 0.0460000000 USD / Hrs | $0.046 per Regional NAT Gateway Hour (TransitGatewayVPN) | прайс-лист от 2026-11-20T22:10:40Z
+NAT | EUN1-NatGateway-Bytes | NGW:NatGateway | 0.0460000000 USD / GB | $0.046 per GB Data Processed by NAT Gateways | прайс-лист от 2026-11-20T22:10:40Z
+NAT | EUN1-RegionalNatGateway-Bytes | NGW:NatGateway | 0.0460000000 USD / GB | Charge for per GB data processed by NAT Gateways | прайс-лист от 2026-11-20T22:10:40Z
+NAT | EUN1-RegionalNatGateway-Hours | NGW:NatGateway | 0.0460000000 USD / Hrs | $0.046 per Regional NAT Gateway Hour (CloudWANS2SVPN) | прайс-лист от 2026-11-20T22:10:40Z
+NAT | EUN1-RegionalNatGateway-Hours | NGW:NatGateway | 0.0460000000 USD / Hrs | $0.046 per Regional NAT Gateway Hour (CloudWANDirectConnect) | прайс-лист от 2026-11-20T22:10:40Z
+NAT | EUN1-NatGateway-Prvd-Bytes | NGW:NatGateway | 0.0000000000 USD / GB | $0.00 per GB Data Processed by NAT Gateways with Provisioned Bandwidth | прайс-лист от 2026-11-20T22:10:40Z
+NAT | EUN1-RegionalNatGateway-Bytes | NGW:NatGateway | 0.0460000000 USD / GB | $0.046 per GB data processed by Regional NAT Gateways (TransitGatewayConcentratorVPN) | прайс-лист от 2026-11-20T22:10:40Z
+NAT | EUN1-RegionalNatGateway-Bytes | NGW:NatGateway | 0.0460000000 USD / GB | $0.046 per GB data processed by Regional NAT Gateways (CloudWANConnect) | прайс-лист от 2026-11-20T22:10:40Z
+NAT | EUN1-RegionalNatGateway-Bytes | NGW:NatGateway | 0.0460000000 USD / GB | $0.046 per GB data processed by Regional NAT Gateways (CloudWANS2SVPN) | прайс-лист от 2026-11-20T22:10:40Z
+NAT | EUN1-RegionalNatGateway-Bytes | NGW:NatGateway | 0.0460000000 USD / GB | $0.046 per GB data processed by Regional NAT Gateways (TransitGatewayDirectConnect) | прайс-лист от 2026-11-20T22:10:40Z
+NAT | EUN1-RegionalNatGateway-Hours | NGW:NatGateway | 0.0460000000 USD / Hrs | $0.046 per Regional NAT Gateway Hour (TransitGatewayDirectConnect) | прайс-лист от 2026-11-20T22:10:40Z
+NAT | EUN1-RegionalNatGateway-Hours | NGW:NatGateway | 0.0460000000 USD / Hrs | $0.046 per Regional NAT Gateway Hour (TransitGatewayPeering) | прайс-лист от 2026-11-20T22:10:40Z
+NAT | EUN1-RegionalNatGateway-Bytes | NGW:NatGateway | 0.0460000000 USD / GB | $0.046 per GB data processed by Regional NAT Gateways (TransitGatewayVPN) | прайс-лист от 2026-11-20T22:10:40Z
+NAT | EUN1-RegionalNatGateway-Bytes | NGW:NatGateway | 0.0460000000 USD / GB | $0.046 per GB data processed by Regional NAT Gateways (TransitGatewayConnect) | прайс-лист от 2026-11-20T22:10:40Z
+NAT | EUN1-RegionalNatGateway-Bytes | NGW:NatGateway | 0.0460000000 USD / GB | $0.046 per GB data processed by Regional NAT Gateways (TransitGatewayPeering) | прайс-лист от 2026-11-20T22:10:40Z
+NAT | EUN1-RegionalNatGateway-Hours | NGW:NatGateway | 0.0460000000 USD / Hrs | $0.046 per Regional NAT Gateway Hour (CloudWANVPC) | прайс-лист от 2026-11-20T22:10:40Z
+NAT | EUN1-RegionalNatGateway-Hours | NGW:NatGateway | 0.0460000000 USD / Hrs | $0.046 per Regional NAT Gateway Hour (TransitGatewayVPC) | прайс-лист от 2026-11-20T22:10:40Z
+Public IPv4 (используется) | EUN1-PublicIPv4:InUseAddress | VPCPublicIPv4Address | 0.0050000000 USD / Hrs | $0.005 per In-use public IPv4 address per hour | прайс-лист от 2026-11-19T20:55:45Z
+Public IPv4 (простаивает) | EUN1-PublicIPv4:IdleAddress | VPCPublicIPv4Address | 0.0050000000 USD / Hrs | $0.005 per Idle public IPv4 address per hour | прайс-лист от 2026-11-19T20:55:45Z

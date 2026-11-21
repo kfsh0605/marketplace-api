@@ -12,9 +12,9 @@ LOCATION="EU (Stockholm)"   # в прайс-листе регион задаёт
 
 fetch() { # <код сервиса> <метка> <фильтры Type=TERM_MATCH,Field=...,Value=...>
   local service="$1" label="$2"; shift 2
-  local args=()
-  for f in "$@"; do args+=(--filters "$f"); done
-  aws pricing get-products --region us-east-1 --service-code "$service" "${args[@]}" --max-results 100 --output json \
+  # ВАЖНО: один флаг --filters со всеми значениями. Повторный --filters в AWS CLI
+  # перезаписывает предыдущий, и тогда действует только последний фильтр (вернутся все регионы).
+  aws pricing get-products --region us-east-1 --service-code "$service" --filters "$@" --max-results 100 --output json \
     | tr -d '\r' \
     | LABEL="$label" node -e '
 let s = "";
