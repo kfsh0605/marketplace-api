@@ -1,0 +1,11 @@
+config:
+  aws:region: eu-north-1
+  aws:defaultTags:
+    tags:
+      Project: nodejs-pro-hw31
+      Stack: base
+      ManagedBy: pulumi
+  hw31:budgetEmail: Kayfush@gmail.com
+  hw31:githubRepo: kfsh0605/marketplace-api
+  hw31:ciOidc: "true"
+encryptionsalt: v1:seqtfFulguY=:v1:3hVNl115ATj/PYaE:WZ21OAXL+L8gw2SL6N5Ea1ksfDsCBg==

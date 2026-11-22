@@ -1,0 +1,20 @@
+{
+  "name": "hw31-infra-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ДЗ №31: стек demo (RDS Multi-AZ, ALB, Lambda, NAT за флагом). Платный, живёт часы.",
+  "main": "index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pulumi/aws": "^7.55.0",
+    "@pulumi/pulumi": "^3.274.1",
+    "@pulumi/random": "^4.21.6"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "ts-node": "^10.9.2",
+    "typescript": "~5.9.3"
+  }
+}

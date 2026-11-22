@@ -4,14 +4,6 @@ import { makeTraceparent, newTraceId, parseLogLines, request, settle, startObsSe
 
 const BURST = 12;
 
-function mostCommon(values: number[]): number | undefined {
-    const counts = new Map<number, number>();
-    for (const value of values) {
-        counts.set(value, (counts.get(value) ?? 0) + 1);
-    }
-    return [...counts.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0]?.[0];
-}
-
 runStandalone(async (failures) => {
     const server = await startObsServer();
     try {
@@ -41,24 +33,27 @@ runStandalone(async (failures) => {
             groups.set(key, (groups.get(key) ?? 0) + 1);
         }
         const sizes = [...groups.values()];
-        const expectedSize = mostCommon(sizes);
-        const uneven = sizes.filter((size) => size !== expectedSize).length;
+        const uneven = sizes.length === 0 ? Number.POSITIVE_INFINITY : Math.max(...sizes) - Math.min(...sizes);
         const matchedSent = sentIds.filter((id) => groups.has(id)).length;
 
         const bearer = `secret-${randomBytes(8).toString('hex')}`;
         const password = `secret-${randomBytes(8).toString('hex')}`;
+        const nestedPassword = `secret-${randomBytes(8).toString('hex')}`;
+        const apiKey = `secret-${randomBytes(8).toString('hex')}`;
+        const queryToken = `secret-${randomBytes(8).toString('hex')}`;
         await request(
             server.port,
             'POST',
-            '/auth/login',
-            { authorization: `Bearer ${bearer}` },
-            { email: 'demo@example.com', password },
+            `/auth/login?token=${queryToken}`,
+            { authorization: `Bearer ${bearer}`, 'x-api-key': apiKey },
+            { email: 'demo@example.com', password, user: { password: nestedPassword } },
         );
         await settle(server.lines);
 
         const all = parseLogLines(server.lines);
-        const secretReqLogged = all.rows.some((row) => row.msg === 'request' && row.req?.url === '/auth/login') ? 1 : 0;
-        const secretInLogs = server.lines.filter((line) => line.includes(bearer) || line.includes(password)).length;
+        const secretReqLogged = all.rows.some((row) => row.msg === 'request' && String(row.req?.url).startsWith('/auth/login')) ? 1 : 0;
+        const markers = [bearer, password, nestedPassword, apiKey, queryToken];
+        const secretInLogs = server.lines.filter((line) => markers.some((marker) => line.includes(marker))).length;
 
         printLines({
             'non-json-lines': all.nonJson,

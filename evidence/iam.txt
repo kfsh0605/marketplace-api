@@ -1,0 +1,12 @@
+role=arn:aws:iam::816142838493:role/hw31-ci-teardown
+ci-user=arn:aws:iam::816142838493:user/hw31-ci
+ci-user-actions=sts:AssumeRole,sts:TagSession
+ci-user-access-keys=1
+action-wildcards=0
+sim-allowed=allowed
+sim-denied=implicitDeny
+sim-denied-iam=implicitDeny
+sim-denied-region=explicitDeny
+sim-user-assume-role=allowed
+sim-user-denied=explicitDeny
+scp-deny-oidc=1

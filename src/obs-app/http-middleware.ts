@@ -16,11 +16,6 @@ export function authContext(req: Request, _res: Response, next: NextFunction): v
     next();
 }
 
-export function requestLog(req: Request, _res: Response, next: NextFunction): void {
-    log.info({ req: { method: req.method, url: req.originalUrl, headers: req.headers, body: req.body } }, 'request');
-    next();
-}
-
 export function errorHandler(error: Error & { status?: number }, _req: Request, res: Response, _next: NextFunction): void {
     const status = error instanceof HttpError ? error.status : (error.status ?? 500);
     if (status >= 500) {

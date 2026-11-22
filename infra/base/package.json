@@ -1,0 +1,19 @@
+{
+  "name": "hw31-infra-base",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ДЗ №31: стек base (бюджет, VPC, IAM для CI). Без почасовых ресурсов.",
+  "main": "index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pulumi/aws": "^7.55.0",
+    "@pulumi/pulumi": "^3.274.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "ts-node": "^10.9.2",
+    "typescript": "~5.9.3"
+  }
+}

@@ -1465,7 +1465,11 @@ HPA створено з `autoscaling/v2`: мінімум 2, максимум 4, 
 
 Дашборд: `http://127.0.0.1:22902`, папка Marketplace, «Marketplace API · RED» (логін і пароль із таблиці змінних нижче). Демо самі підіймають власний екземпляр застосунку на `:22911`, тому `obs:serve` потрібен лише для того, щоб дашборд побачив трафік.
 
-Ендпоінт, на якому все перевіряється, це оформлення замовлення `POST /orders/checkout` (поруч `GET /orders/:id`, `POST /auth/login`, `GET /metrics`). Це окремий застосунок зі шарами controller, service і repository в пам'яті (`src/obs-app/`): демо мають працювати в грейдера без Postgres і без секретів. Модулі `src/observability/*` (трасування, логер, контекст, метрики) від нього не залежать і підключаються до будь-якого Express/Nest-застосунку.
+Ендпоінт, на якому все перевіряється, це оформлення замовлення `POST /orders/checkout` (поруч `GET /orders/:id`, `POST /auth/login`, `GET /metrics`). Це окремий застосунок зі шарами controller, service і repository в пам'яті (`src/obs-app/`): демо мають працювати в грейдера без Postgres і без секретів. Модулі `src/observability/*` (трасування, логер, контекст, метрики, безпечний лог запиту) від нього не залежать.
+
+Той самий набір підключено й до справжнього Nest-сервісу. `src/main.ts` першим рядком імпортує `./observability/tracing` (інструментація має завантажитися раніше за `express` і `http`), а `configureObservability` (`src/observability/nest-setup.ts`) вмикає pino-логер Nest (`PinoNestLogger`), `/metrics`, контекст запиту, RED-middleware і лог запиту. Викликає її лише `main.ts`: e2e-тести й демо, що піднімають Nest у процесі через `configureApp`, лишаються без телеметрії. `ProblemExceptionFilter` для відповідей 5xx пише рядок `request failed` у лог (з `trace_id`) і ставить на span статус `ERROR`; раніше цей фільтр ловив усе й нічого не записував. Щоб Prometheus скрейпив справжній Nest замість `obs:serve`, запустіть його на порту 22910: `PORT=22910 node dist/main.js` з тими самими змінними, що в блоці Grading.
+
+**Справжній Nest (ручна перевірка).** Окремого демо для Nest немає, перевірено вручну на повному стенді з блоку Grading. Запити `/health` (з відомим `traceparent`), `/orders` без токена й неіснуючий шлях дали коди 200, 401 і 404. Рядків лога не в JSON `0`; рядки Nest мають `layer: nest` і поле `context`, а рядок запиту має той самий `trace_id`, що й заголовок. `/metrics` показав `http_requests_total{route="/health",status="200"} 2`, `{route="/orders",status="401"} 1` і `{route="unmatched",status="404"} 1` (скрейпи `/metrics` не рахуються). У Jaeger за цим `trace_id` знайдено `GET /health`, `request handler - /health` і middleware-span-и Express. Після зупинки pgbouncer `/health` відповів 503: у лозі з'явився рядок `request failed` з `trace_id`, span отримав `otel.status_code=ERROR`, а метрика `status="503"` зросла на одиницю. Юніт-тести (139) і e2e (41) лишилися зеленими.
 
 ### Змінні
 
@@ -1510,7 +1514,7 @@ HPA створено з `autoscaling/v2`: мінімум 2, максимум 4, 
 
 Кожне демо стартує з чистого стану (свіжий процес застосунку), друкує `key=number`, обчислює числа з реальних логів, метрик і span-ів, сама перевіряє інваріанти й завершується кодом ≠ 0 при порушенні. Кожне запущено тричі поспіль: вивід збігається побайтово (однаковий `md5sum` у трьох запусків).
 
-**`npm run demo:logs`: кореляція живе в контексті.** Один запит з власним `traceparent`, потім пачка з 12 однакових паралельних запитів (у кожного свій `traceparent`), потім логін із двома випадковими маркерами (у `Authorization: Bearer` і в `password`).
+**`npm run demo:logs`: кореляція живе в контексті.** Один запит з власним `traceparent`, потім пачка з 12 однакових паралельних запитів (у кожного свій `traceparent`), потім логін із п'ятьма випадковими маркерами: у `Authorization: Bearer`, у `password`, у вкладеному `user.password`, в заголовку `x-api-key` і в query-рядку `?token=`.
 
     non-json-lines=0
     layers=4
@@ -1522,7 +1526,7 @@ HPA створено з `autoscaling/v2`: мінімум 2, максимум 4, 
     secret-req-logged=1
     secret-in-logs=0
 
-`layers` це число різних полів `layer` (`http`, `orders.controller`, `orders.service`, `orders.repo`) у рядках одного запиту; `distinct-trace-ids` це число різних `trace_id` у тих самих рядках (рядок без `trace_id` рахується окремим значенням, тож втрачений контекст видно); `trace-id-matches-header` порівнює `trace_id` з trace-id заголовка, який ми відправили. `burst-trace-ids` це число груп рядків за `trace_id` після пачки, `burst-uneven` це число груп, чий розмір відрізняється від звичайного. Змінна «поточний запит» на рівні модуля дала б `burst-uneven > 0`; контекст, втрачений на колбеку, дав би рядок без `trace_id`. `secret-req-logged=1` потрібен, щоб «секретів немає» не вийшло просто через те, що запит не логується.
+`layers` це число різних полів `layer` (`http`, `orders.controller`, `orders.service`, `orders.repo`) у рядках одного запиту; `distinct-trace-ids` це число різних `trace_id` у тих самих рядках (рядок без `trace_id` рахується окремим значенням, тож втрачений контекст видно); `trace-id-matches-header` порівнює `trace_id` з trace-id заголовка, який ми відправили. `burst-trace-ids` це число груп рядків за `trace_id` після пачки, `burst-uneven` це різниця між найбільшою й найменшою групою (`max − min`): нуль означає, що кожен запит залишив однакову кількість рядків. Змінна «поточний запит» на рівні модуля дала б `burst-uneven > 0`; контекст, втрачений на колбеку, дав би рядок без `trace_id`. `secret-req-logged=1` потрібен, щоб «секретів немає» не вийшло просто через те, що запит не логується.
 
 **`npm run demo:metrics`: набір label-ів обмежений.** 60 успішних (серед них один повільний, ≈0,4 с) і 15 падінь (`GET /orders/boom` дає 500), потім 100 запитів із різними id.
 
@@ -1569,7 +1573,9 @@ JSON лежить у репозиторії (`observability/grafana/dashboards/r
 
 `trace_id` береться з активного span-а OpenTelemetry (`trace.getActiveSpan()` у `mixin` pino), своїх uuid немає. `userId`, `tenant` і `idempotencyKey` лежать в `AsyncLocalStorage`: контекст кладе middleware один раз на вході, `userId` дописує автентифікація. Жодна функція не отримує `req` заради логування.
 
-`redact` ховає значення за точними шляхами (`req.headers.authorization`, `req.body.password`, `req.body.refreshToken` та ін.) і не вгадує нічого поза списком. Перевірено вручну: `req.body.profile.token` на рівень глибше за `*.token`, і його значення потрапило в лог відкритим текстом. Тобто список шляхів пишуть руками, а демо перевіряє лише ті секрети, які відправляє.
+Лог запиту (`src/observability/request-log.ts`) працює за списком дозволеного, а не заборонного. У рядок потрапляють метод, шлях без query-рядка (`?token=…` не логується) і вісім заголовків: `traceparent`, `tracestate`, `x-tenant`, `idempotency-key`, `user-agent`, `content-type`, `content-length`, `accept`. Тіла запиту в логу немає взагалі: чого не записано, те не витече. `traceparent` у списку потрібен, бо `demo:trace` читає його з рядка логу.
+
+`redact` лишається другим рубежем для решти викликів `log.info({ ... })`. Він ховає значення за точними шляхами (`req.headers.authorization`, `req.body.password`, `req.body.refreshToken` та ін.) і не вгадує нічого поза списком: `req.body.profile.token` на рівень глибше за `*.token` потрапляло в лог відкритим текстом. Так само, через `body.user.password`, перша версія логу запиту протекла під час ревью: вона логувала весь `req.body`, а демо відправляло лише верхній `password`. Тепер демо підсовує п'ять маркерів (bearer, `password`, вкладений `user.password`, `x-api-key`, `?token=`) і перевіряє, що жоден не опинився в логах; на старому коді воно падало (`secret-in-logs=1`).
 
 `AsyncLocalStorage` губить контекст, коли колбек створено поза запитом, а виконує його інший цикл (пул з'єднань, listener зі старту, BullMQ-воркер). Лікує `bindToContext` (обгортка над `AsyncResource.bind`): прив'язаний колбек зберігає контекст запиту, непривʼязаний його втрачає.
 
@@ -1581,7 +1587,191 @@ JSON лежить у репозиторії (`observability/grafana/dashboards/r
 - Бонус із GlitchTip у цьому ДЗ не виконано.
 - Метрики процесу з `collectDefaultMetrics` збираються, але панелей для них немає (USE-питання розбирає лекція №30).
 - Вимірювання пам'яті й часу зроблені одним прогоном на одній машині; числа показують порядок величин.
+- У Nest-сервісі `userId` не потрапляє в контекст логів: `AuthGuard` його не пише, а після гарда в Nest немає рядка, де це було б видно. У `obs-app` `userId` є (хеш токена).
+- `/metrics` у Nest і в `obs-app` віддається на тому самому порту без автентифікації; у проді його закривають мережею (окремий порт або NetworkPolicy).
+- `main.ts` не викликає `flushTraces()` і `shutdownTracing()` при SIGTERM, тож span-и останніх ~500 мс (інтервал `BatchSpanProcessor`) при зупинці можуть не дійти; `obs-app/server.ts` це робить.
+- У Nest лишилися окремі `console.error` (пул Postgres, RabbitMQ): вони пишуть текстом, не JSON. На старті таких рядків немає (перевірено, 0), але при збоях вони з'являються.
 - Автентифікація в застосунку для демо спрощена: `userId` це перші вісім hex-символів SHA-256 від bearer-токена, замість перевірки JWT з ДЗ №24.
+
+## AWS (ДЗ №31)
+
+смуга: основна
+
+Оцінюваний прогін teardown (запуск вручну, `workflow_dispatch`, знесено 10 ресурсів, шість нулів): https://github.com/kfsh0605/marketplace-api/actions/runs/44848260137
+
+Це справжній акаунт AWS на плані Free (без апгрейду, без Organizations і Control Tower, без LocalStack). Інфраструктура поділена на два стеки Pulumi: `infra/base` живе постійно і нічого не коштує, `infra/demo` піднімається на хвилини і зноситься щоночі.
+
+### Регіон
+
+Усе в `eu-north-1` (Stockholm). Регіон проєкту задається країною контактної адреси акаунта, а політика організації (SCP) пускає лише `eu-north-1`, `us-east-1` і `us-west-2`. У `us-east-1` та сама політика явно забороняє `tag:GetResources`, тож перевірки порожнечі там неможливі; вони виконуються лише в `eu-north-1`, а в логу teardown стоїть рядок `us-east-1-checks=skipped (explicit deny by the organization policy ...)`. Стан Pulumi, ключ CI і бюджет теж у цьому акаунті; ресурсів у `us-east-1` проєкт не створює.
+
+### Що розгортається
+
+`infra/base` (нічого не тарифікується щогодини): бюджет $5 з сповіщенням ACTUAL (створюється першим, VPC залежить від нього; FORECASTED на нових акаунтах не працює), VPC `10.31.0.0/16`, по дві публічні й приватні підмережі у двох зонах, Internet Gateway, таблиці маршрутів (публічна з дефолтним маршрутом на IGW, приватна без дефолтного маршруту), три групи безпеки (`edge` з портом 80 з інтернету, `app`, `db` з портом 5432 лише від `app`; у коді біля кожного відкритого порту є коментар чому), роль Lambda `hw31-lambda-exec` без політик, IAM для CI (див. нижче).
+
+`infra/demo` (платне, живе хвилини): RDS PostgreSQL Multi-AZ `db.t4g.micro`, gp3 20 ГіБ, шифрування, `backupRetentionPeriod: 1`; ALB з цільовою групою (health check `/health`) і Lambda як ціллю (немає годинної машини, образу й SSH); NAT-шлюз з Elastic IP лише за прапорцем `hw31:withNat`. Перед першим ресурсом реєструється `registerResourceTransform`, що примусово ставить `deletionProtection: false` і `skipFinalSnapshot: true` для будь-якої RDS, щоб забуте значення не зупинило нічний `destroy`.
+
+Команди (усі через `scripts/with-secrets.sh`):
+
+    npm run aws:bootstrap      # одноразово: S3-бакет зі станом Pulumi
+    npm run up:base            # постійна частина
+    npm run up:demo            # платна частина, близько 15 хвилин (RDS Multi-AZ)
+    npm run demo:alb           # ALB відповідає 200, ціль healthy
+    npm run demo:failover      # перемикання Multi-AZ, вимір часу
+    npm run demo:nat           # NAT на хвилини і назад (за прапорцем hw31:withNat)
+    npm run destroy:demo       # знести платну частину
+    npm run destroy:base       # знести постійну частину (після здачі)
+
+### Ставки (власна таблиця, eu-north-1)
+
+Зібрано `npm run prices` (`aws pricing get-products`, фільтр `location = EU (Stockholm)`, дата збору 2026-11-21), повний вивід у `evidence/prices.txt`. Ставки застарівають, тому біля кожної стоїть дата публікації прайс-листа, яку я бачив.
+
+| Ресурс | Ставка (USD) | Прайс-лист від |
+|---|---|---|
+| ALB, година (`EUN1-LoadBalancerUsage`) | 0,02394 | 2026-11-19T22:27:09Z |
+| ALB, LCU-година (`EUN1-LCUUsage`) | 0,0076 | 2026-11-19T22:27:09Z |
+| RDS `db.t4g.micro` Multi-AZ PostgreSQL, година | 0,033 | 2026-11-20T22:46:19Z |
+| RDS gp3 Multi-AZ, ГіБ на місяць | 0,24 | 2026-11-20T22:46:19Z |
+| NAT-шлюз, година (`EUN1-NatGateway-Hours`) | 0,046 | 2026-11-20T22:10:40Z |
+| NAT, оброблений ГБ (`EUN1-NatGateway-Bytes`) | 0,046 | 2026-11-20T22:10:40Z |
+| Публічний IPv4, година (зайнятий і простоюючий) | 0,005 | 2026-11-19T20:55:45Z |
+
+У виводі є ще рядки `RegionalNatGateway-*`: це інша послуга (регіональний NAT), у цій роботі її немає, нашому шлюзу відповідає `EUN1-NatGateway-Hours`.
+
+Що з цього виходить за годину для стека `demo` (мій розрахунок за таблицею, не з білінгу): RDS 0,033 + сховище 20 ГіБ × 0,24 / 730 ≈ 0,0066 + ALB 0,02394 + дві публічні адреси ALB (по одній на підмережу) 2 × 0,005 = 0,010, разом ≈ **$0,074 на годину**, ≈ $1,76 на добу. З NAT: ще 0,046 + 0,005 за його Elastic IP, разом ≈ **$0,125 на годину**, ≈ $3,00 на добу. Саме тому demo зноситься щоночі, а NAT живе хвилини; NAT, увімкнений на 3 хвилини, коштує як повна година, бо початий час рахується цілим.
+
+### Виміри
+
+`evidence/demos.txt` (пише `scripts/lib/demos-write.mjs`, повторний запуск замінює свій розділ):
+
+    ## demo:alb
+    alb-dns=hw31-demo-alb-1789214116.eu-north-1.elb.amazonaws.com
+    http-code=200
+    target-state=healthy
+    body={"ok":true,"service":"hw31-demo","path":"/"}
+    
+    ## demo:failover
+    standby-az-before=eu-north-1a
+    az-before=eu-north-1b
+    az-after=eu-north-1a
+    failover-seconds=416
+    event=Multi-AZ instance failover completed
+    
+    ## demo:nat
+    # Значения перенесены из вывода первого реального запуска npm run demo:nat:
+    # позже раздел пропал из файла при повторных замерах ALB и failover, а повторно NAT не поднимали.
+    nat-gateway=nat-050106da9f36360de
+    nat-state-up=available
+    private-default-route-via-nat=1
+    nat-minutes=3
+    nat-billed-hours=1
+
+`failover-seconds` рахується від команди перезавантаження з перемиканням (`reboot --force-failover`) до моменту, коли зона змінилася **і** база знову `available`. У цьому прогоні вийшло 416 с, у попередньому 91 с, а події RDS (`started` до `completed`) показали близько 25 с: інстанс стає доступним для клієнтів пізніше, ніж завершується перемикання. Обмеження ТЗ (20-600 с) дотримано, але розкид великий, тож усі числа я наводжу як виміряні, без усереднення. NAT у `demo:nat` прожив 3 хвилини, виставляється 1 година. Значення розділу `demo:nat` перенесено з виводу першого реального запуску: цей розділ зник із файлу під час повторних замірів ALB і failover, а повторно NAT не піднімали (це ще година тарифікації).
+
+`evidence/base.txt` і `evidence/base-state.json` (знімок `infra/base`):
+
+    region=eu-north-1
+    vpc-id=vpc-057bca8ad2aefdfff
+    public-subnets=2
+    private-subnets=2
+    subnet-azs=2
+    internet-gateways=1
+    public-default-route-via-igw=1
+    private-default-route=0
+    nat-gateways=0
+    security-groups=3
+    budget-limit-usd=5.0
+    budget-notifications-actual=1
+    budget-notifications-forecasted=0
+
+### Teardown
+
+`.github/workflows/teardown.yml`: розклад `0 2 * * *` (лише з гілки за замовчуванням) і `workflow_dispatch`. Порядок: вхід в AWS, `aws sts get-caller-identity` (у логу видно `assumed-role/hw31-ci-teardown`), доказ блокування OIDC, `scripts/teardown.sh`: `pulumi destroy` стека demo, експорт стану, шість перевірок і підсумок. Усі шість лічильників мають бути нулями, інакше крок падає:
+
+    state-resources-left=0 OK    # у стані Pulumi нічого не лишилося
+    tagged-resources-left=0 OK   # Resource Groups Tagging API: жодного ресурсу з тегами Project/Stack=demo
+    rds-left=0 OK
+    alb-left=0 OK
+    nat-left=0 OK
+    eip-left=0 OK
+
+Видалений NAT-шлюз AWS ще понад годину показує в Tagging API як запис у стані `deleted`. Через це два перші зарахункові прогони впали на `tagged-resources-left=1`, хоча справжній `destroy` був успішним (прогони 44835021135 і 44842352087). Тепер перевірка не рахує залишком лише NAT-шлюзи, які EC2 повідомляє як `deleted` або `NatGatewayNotFound`, і друкує кожне таке виключення окремим рядком `ignored-deleted-nat-gateway=...`. Будь-який інший ресурс і будь-яка невизначеність і далі дають FAIL. В останньому прогоні виключень не знадобилося: надгробок уже зник.
+
+### IAM: що може CI
+
+Роль `hw31-ci-teardown` має лише ці дозволи (усі дії явні, `*` у діях немає; регіональні групи обмежені умовою `aws:RequestedRegion = eu-north-1`):
+
+    StateBucketList: Allow s3:ListBucket, s3:GetBucketLocation на arn:aws:s3:::hw31-pulumi-state-816142838493
+    StateBucketObjects: Allow s3:GetObject, s3:PutObject, s3:DeleteObject на arn:aws:s3:::hw31-pulumi-state-816142838493/*
+    EmptinessChecks: Allow tag:GetResources, rds:DescribeDBInstances, elasticloadbalancing:DescribeLoadBalancers, ec2:DescribeNatGateways, ec2:DescribeAddresses на * [регіон eu-north-1]
+    ScpEvidence: Allow iam:ListOpenIDConnectProviders на *
+    DestroyDatabase: Allow rds:DeleteDBInstance, rds:ModifyDBInstance, rds:ListTagsForResource, rds:DescribeDBSubnetGroups, rds:DeleteDBSubnetGroup на * [регіон eu-north-1]
+    DestroyLoadBalancer: Allow elasticloadbalancing:DeleteLoadBalancer, elasticloadbalancing:DescribeLoadBalancerAttributes, elasticloadbalancing:ModifyLoadBalancerAttributes, elasticloadbalancing:DescribeTags, elasticloadbalancing:DescribeListeners, elasticloadbalancing:DescribeListenerAttributes, elasticloadbalancing:DeleteListener, elasticloadbalancing:DescribeTargetGroups, elasticloadbalancing:DescribeTargetGroupAttributes, elasticloadbalancing:DescribeTargetHealth, elasticloadbalancing:DeregisterTargets, elasticloadbalancing:DeleteTargetGroup на * [регіон eu-north-1]
+    DestroyLambdaTarget: Allow lambda:GetFunction, lambda:ListVersionsByFunction, lambda:GetPolicy, lambda:RemovePermission, lambda:DeleteFunction на * [регіон eu-north-1]
+    DestroyNat: Allow ec2:DeleteNatGateway, ec2:ReleaseAddress, ec2:DisassociateAddress, ec2:DescribeAddressesAttribute, ec2:DeleteRoute, ec2:DescribeRouteTables, ec2:DescribeNetworkInterfaces, ec2:DescribeTags на * [регіон eu-north-1]
+
+Заборонено все інше, зокрема `iam:Create*`, `iam:Put*`, `iam:Attach*`, `iam:PassRole`, `iam:UpdateAssumeRolePolicy`, `iam:CreateAccessKey`: роль не може створити собі прав. Вихід `evidence/iam.txt` (`scripts/evidence-iam.sh`, симуляції `aws iam simulate-principal-policy` на цій ролі):
+
+    role=arn:aws:iam::816142838493:role/hw31-ci-teardown
+    ci-user=arn:aws:iam::816142838493:user/hw31-ci
+    ci-user-actions=sts:AssumeRole,sts:TagSession
+    ci-user-access-keys=1
+    action-wildcards=0
+    sim-allowed=allowed
+    sim-denied=implicitDeny
+    sim-denied-iam=implicitDeny
+    sim-denied-region=explicitDeny
+    sim-user-assume-role=allowed
+    sim-user-denied=explicitDeny
+    scp-deny-oidc=1
+
+`sim-allowed` це `rds:DescribeDBInstances` в `eu-north-1`; `sim-denied` це `rds:CreateDBInstance` (ролі дозволено лише знищувати, не створювати); `sim-denied-iam` це `iam:CreateAccessKey`; `sim-denied-region` це той самий `rds:DescribeDBInstances` в `eu-west-1`, який на практиці дає `explicitDeny` через SCP; `sim-user-assume-role` і `sim-user-denied` показують, що користувач `hw31-ci` може лише `sts:AssumeRole` на цю роль і більше нічого. Повний JSON довіри й політик у `evidence/iam.json`.
+
+### Чому ключ, а не OIDC
+
+Правильна схема для GitHub Actions це OIDC: короткоживучий токен замість ключа. На цьому акаунті вона неможлива: SCP `DenyIAMRestrictedActions` забороняє `iam:*Provider*`, тож OIDC-провайдера не створити ні на Free, ні на Paid. Доказ у кожному прогоні: крок `Proof - OIDC providers are blocked by a service control policy` виконує `aws iam list-open-id-connect-providers` (роль має цей дозвіл) і AWS відповідає явною забороною організації; у `evidence/iam.txt` це `scp-deny-oidc=1`. Схема узгоджена з викладачем:
+
+- IAM-користувач `hw31-ci` має єдину дію: `sts:AssumeRole` + `sts:TagSession` на роль `hw31-ci-teardown`; уся робота йде вже під роллю (твердження `Arn` з `assumed-role` у логу).
+- Ключ користувача лежить **лише** в секретах GitHub Environment `teardown` (`CI_KEY_ID`, `CI_KEY_SECRET`), у репозиторії та в стані Pulumi його немає. Його створює не Pulumi, а `npm run ci:key`: скрипт одразу передає ключ у `gh secret set`, а якщо запис не вдався, видаляє новий ключ. Environment дозволяє гілки `main` і `hw-31`.
+- Workflow запускається лише за розкладом і вручну; тригерів, що віддають секрети коду з чужих форків, немає, а дії закріплено за SHA.
+- Довіра до GitHub OIDC (з умовами `aud` і `sub` для `main` та `hw-31`) вже описана в ролі за прапорцем `hw31:ciOidc`; AWS прийняв її навіть без провайдера. Коли політику організації знімуть, достатньо створити провайдера, а ключ прибрати.
+
+Що отримає той, хто вкраде ключ: лише можливість узяти цю роль, тобто знищити демо-ресурси (RDS, ALB, NAT, Lambda) і читати/писати стан Pulumi в бакеті. Створювати ресурси й чіпати IAM вона не може. Для демо-стенда це прийнятний ризик, а після здачі ключ і обидва секрети видаляються (див. нижче).
+
+### RDS Multi-AZ проти мого стеку з ДЗ №15
+
+У ДЗ №15 база це один контейнер Postgres і нічний `pg_dump` (`backup.cron`): RPO до 24 години, відновлення з дампу в чистий контейнер вручну (RTO 2-3 с виміряно на дампі 19 КБ, на реальних даних це хвилини й більше), і втрата самого хоста означає втрату всього, що з'явилося після останнього бекапу. Multi-AZ instance у RDS це основна база плюс **синхронна** запасна копія в іншій зоні: при відмові зони чи хоста AWS сам перемикає ім'я на запасну, і закомічені транзакції не губляться (RPO близько нуля), а ручного відновлення немає. Вимір: 416 с до `available` (події RDS показали близько 25 с самого перемикання). Але це не заміна бекапу: логічна помилка (`DROP TABLE`, поганий `UPDATE`) копіюється на запасну миттєво, тому від неї рятують бекапи з періодом збереження (у нас `backupRetentionPeriod: 1`) і відновлення на момент часу. Запасна копія не відповідає на запити (це не read replica) і подвоює годинну ціну інстанса: 0,033 $/год проти приблизно половини для Single-AZ. Отже: Multi-AZ дає доступність при відмові зони, бекап дає відновлення після людської помилки, і потрібні обидва.
+
+### KMS і шифрування
+
+База створена з `storageEncrypted: true` без `kmsKeyId`, тобто шифрується керованим ключем AWS `aws/rds`. Власний ключ (customer-managed key) я не створював: він коштує $1 на місяць за кожен ключ плюс запити, а нашій задачі (шифрування сховища «у спокої») вистачає ключа за замовчуванням. Ціна цього рішення: політику ключа `aws/rds` змінити не можна, ротацією керує AWS, знімки з цим ключем не можна передати в інший акаунт, і розділити доступ до ключа та до бази окремими правилами немає як. Для демо-бази без чутливих даних це прийнятно; для продакшену з вимогами аудиту власний ключ із політикою потрібен.
+
+### Бекенд стану: чим відрізняється від ДЗ №28
+
+У ДЗ №28 Pulumi працював із файловим бекендом (`file://` на диску, `scripts/pulumi.sh`, парольна фраза в `secrets/pulumi_passphrase`): стан живе на одній машині й недоступний для CI. Тут бекенд `s3://hw31-pulumi-state-<id акаунта>?region=eu-north-1` (бакет створює `npm run aws:bootstrap`, поза Pulumi, бо стан не може створити власне сховище). Завдяки цьому нічний `destroy` на раннері GitHub бачить той самий стан, що й мій комп'ютер. Платою став замок стека в S3 (`.pulumi/locks/...`): паралельний запуск `up:demo` і teardown упирається в `the stack is currently locked`, що я бачив. Парольна фраза порожня (`PULUMI_CONFIG_PASSPHRASE=""`), а `encryptionsalt` лежить у `Pulumi.<stack>.yaml`, тож секретні значення в стані (випадковий пароль БД) практично не захищені шифруванням: захист це приватний бакет і обмежена роль CI. Для навчального стенда прийнятно, для продакшену потрібен KMS-ключ або секрет-менеджер.
+
+### Вартість
+
+Бюджет $5 з сповіщенням (бюджет лише повідомляє, нічого не зупиняє). Мій підсумок: три підйоми demo по 15-30 хвилин і один NAT на 1 тарифікований годину: за ставками з таблиці це порядку $0,2-0,3 (оцінка за прайс-листом, не з Cost Explorer). Постійна частина `infra/base` нічого не коштує за годину.
+
+### Відомі прогалини
+
+- Розділ `demo:nat` у `evidence/demos.txt` перенесено з виводу першого реального запуску (див. примітку в самому файлі), а не виміряно повторно.
+- Нічний розклад спрацьовує лише з гілки за замовчуванням: до злиття PR у `main` лежить заглушка workflow, тому справжній teardown запускався вручну з `hw-31` (`--ref hw-31`).
+- OIDC недоступний через SCP, вхід по ключу `hw31-ci` (див. вище); довіра до OIDC описана, але не використовується.
+- `us-east-1` не перевіряється (явна заборона SCP на `tag:GetResources`).
+- Крок доказу SCP має `continue-on-error`, щоб відповідь AWS не валила джоб.
+- Виключення видалених NAT з лічильника тегів це свідоме правило для запису-надгробка, а не прихований обхід: кожен випадок друкується, інші ресурси не пропускаються.
+- Парольна фраза Pulumi порожня; зберігання секретів у стані покладається на приватний бакет.
+- Час перемикання Multi-AZ має великий розкид (91 с, 416 с); подія RDS показує близько 25 с.
+
+### Після здачі
+
+    npm run ci:key:delete      # видалити ключ hw31-ci і обидва секрети Environment teardown
+    npm run destroy:base       # знести постійну частину
+    # бакет зі станом видаляється вручну (aws s3 rb s3://hw31-pulumi-state-<id> --force)
+
+У ДЗ №32 крок з ключем у `teardown.yml` прибрати.
 
 ## Структура
 
@@ -1688,9 +1878,16 @@ JSON лежить у репозиторії (`observability/grafana/dashboards/r
 | `demo/image.mjs`, `demo/rollout.mjs`, `demo/pdb.mjs`, `demo/lib/` | `npm run demo:image`, `demo:rollout`, `demo:pdb` і їхня чиста логіка (підрахунок, вердикти) |
 | `secrets/pulumi_passphrase.example` | Шаблон парольної фрази Pulumi (реальний `secrets/pulumi_passphrase` у `.gitignore`) |
 | `test/unit/k8s.spec.ts`, `test/unit/infra-settings.spec.ts`, `test/unit/scan-gate.spec.ts`, `test/unit/rollout-stats.spec.ts`, `test/unit/pdb-logic.spec.ts` | Юніт-тести ДЗ №28: життєвий цикл пода, валідація змінних, поріг сканера, підрахунок rollout, вибір подів для виселення |
-| `src/observability/tracing.ts`, `logger.ts`, `request-context.ts`, `context.middleware.ts`, `metrics.ts` | OpenTelemetry SDK і експорт span-ів; pino з `mixin` (trace_id/span_id) і `redact`; контекст запиту в `AsyncLocalStorage`; метрики RED (`prom-client`) |
+| `src/observability/tracing.ts`, `logger.ts`, `request-context.ts`, `context.middleware.ts`, `metrics.ts`, `request-log.ts`, `nest-logger.ts`, `nest-setup.ts` | OpenTelemetry SDK і експорт span-ів; pino з `mixin` (trace_id/span_id) і `redact`; контекст запиту в `AsyncLocalStorage`; метрики RED (`prom-client`); лог запиту за списком дозволеного; логер Nest на pino і підключення всього цього до Nest (`configureObservability`, викликається з `main.ts`) |
 | `src/obs-app/` | Невеликий застосунок для демо Observability: controller, service і repository в пам'яті, `/metrics`, `/auth/login` |
 | `src/lib/obs-demo-kit.ts`, `src/lib/demo-client-env.ts` | Спільний код трьох демо: запуск застосунку, запити з `traceparent`, розбір логів і `/metrics` |
 | `src/demo-logs.ts`, `src/demo-metrics.ts`, `src/demo-trace.ts` | `npm run demo:logs`, `demo:metrics`, `demo:trace` |
 | `observability/` | Конфіг Prometheus, провіжинінг Grafana (датасорси, провайдер) і JSON дашборда RED |
 | `secrets/grafana_admin_password.example` | Шаблон пароля Grafana (справжній файл у `.gitignore`) |
+| `infra/base/`, `infra/demo/` | Pulumi-стеки ДЗ №31: `base` (бюджет, VPC, підмережі, SG, IAM для CI), `demo` (RDS Multi-AZ, ALB, NAT за прапорцем), перед ресурсами `registerResourceTransform` |
+| `infra/base/src/ci-access.ts` | Користувач `hw31-ci`, роль `hw31-ci-teardown` з явними діями без `*`, довіра до OIDC за прапорцем |
+| `scripts/aws-bootstrap.sh`, `scripts/pulumi-aws.sh`, `scripts/lib/aws-env.sh` | Бакет стану S3, обгортка Pulumi (`up`/`destroy`/`export`/`outputs` для `base` і `demo`), спільне середовище AWS |
+| `scripts/demo-alb.sh`, `scripts/demo-failover.sh`, `scripts/demo-nat.sh`, `scripts/lib/demos-write.mjs` | `npm run demo:alb`, `demo:failover`, `demo:nat` і запис у `evidence/demos.txt` |
+| `scripts/teardown.sh`, `.github/workflows/teardown.yml` | Знесення demo, шість перевірок порожнечі й підсумок; нічний розклад і ручний запуск |
+| `scripts/ci-secrets.sh`, `scripts/evidence-base.sh`, `scripts/evidence-iam.sh`, `scripts/prices.sh` | Ключ CI в секретах Environment, знімки `base` та IAM, збір ставок із прайс-листа |
+| `evidence/` | `base.txt`, `base-state.json`, `iam.json`, `iam.txt`, `demos.txt`, `prices.txt` |

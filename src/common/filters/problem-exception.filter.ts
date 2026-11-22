@@ -6,8 +6,11 @@ import {
     HttpStatus,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { SpanStatusCode, trace } from '@opentelemetry/api';
+import { createLogger } from '../../observability/logger';
 
 const PROBLEM_BASE = 'https://example.com/problems';
+const log = createLogger('exception-filter');
 
 const TITLES: Record<number, string> = {
     400: 'Bad Request',
@@ -43,6 +46,15 @@ export class ProblemExceptionFilter implements ExceptionFilter {
             }
         } else if (exception instanceof Error) {
             detail = exception.message;
+        }
+
+        if (status >= 500) {
+            log.error({ err: exception }, 'request failed');
+            const span = trace.getActiveSpan();
+            if (exception instanceof Error) {
+                span?.recordException(exception);
+            }
+            span?.setStatus({ code: SpanStatusCode.ERROR });
         }
 
         const title = TITLES[status] ?? 'Error';

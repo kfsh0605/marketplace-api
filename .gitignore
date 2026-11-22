@@ -171,3 +171,5 @@ infra/bin/
 infra/Pulumi.*.yaml
 secrets/grafana_admin_password
 
+secrets/aws_access_key_id
+secrets/aws_secret_access_key
