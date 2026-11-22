@@ -1,0 +1,70 @@
+name: deploy
+
+# Деплой після злиття в main (і вручну). Образ збирається тим самим build.yml, а деплоїться за digest з його виходу.
+# schedule тут немає: ручний запуск (workflow_dispatch) і push у main - єдині тригери.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build (once)
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build.yml
+
+  oidc:
+    name: gate OIDC (signature + policy)
+    runs-on: ubuntu-latest
+    environment: prod
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Ask GitHub for an ID token, verify the signature by jwks_uri, apply oidc/policy.json
+        run: |
+          mkdir -p ci-out
+          node scripts/oidc-gate.mjs --evidence-out ci-out/oidc.env
+
+      - name: Upload OIDC evidence part
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: part-oidc
+          path: ci-out/
+          if-no-files-found: ignore
+
+  deploy:
+    name: deploy to kind (preview, cost gate, up, rollout)
+    needs: [build, oidc]
+    runs-on: ubuntu-latest
+    environment: prod
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Deploy by digest
+        uses: ./.github/actions/deploy-kind
+        with:
+          image: ${{ needs.build.outputs.ref }}
+
+      - name: Upload deploy evidence part
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: part-deploy
+          path: ci-out/
+          if-no-files-found: ignore

@@ -1,0 +1,135 @@
+name: deploy-kind
+description: >
+  Піднімає kind у раннері, ганяє pulumi preview, гейт вартості, pulumi up програми infra/ (ДЗ №28) і demo:rollout.
+  Образ береться за digest з виходу джоби збірки. Усі файли доказів лягають у ci-out/.
+
+inputs:
+  image:
+    description: Повне посилання образ@sha256:digest
+    required: true
+  budget-usd:
+    description: Місячний бюджет для гейту вартості
+    required: false
+    default: '10'
+  min-requests:
+    description: DEMO_MIN_REQUESTS для demo:rollout
+    required: false
+    default: '2000'
+  cost-bypass:
+    description: true, якщо на PR стоїть мітка cost-approved (дозволяє пропустити лише gate=fail)
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Node
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: '24'
+        cache: npm
+        cache-dependency-path: |
+          package-lock.json
+          infra/package-lock.json
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        npm ci
+        npm ci --prefix infra
+
+    - name: Pulumi CLI
+      uses: pulumi/setup-pulumi@b374ceb6168550de27c6eba92e01c1a774040e11 # v2.0.0
+      with:
+        pulumi-version: 3.274.1
+
+    - name: kind cluster
+      uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1.15.2
+      with:
+        cluster_name: hw28
+        config: k8s/kind-config.yaml
+        wait: 120s
+
+    - name: Application secrets (random, live only in this run)
+      shell: bash
+      run: bash scripts/ci-vault.sh
+
+    - name: Pulumi preview (plan.json)
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        PULUMI_STACK_NAME: ci
+        ROLLOUT_PROFILE: zero
+        ROLLOUT_REV: '1'
+      run: |
+        mkdir -p ci-out
+        bash scripts/with-secrets.sh dev bash scripts/pulumi.sh preview --json --show-sames > ci-out/plan.json
+
+    - name: Cost gate
+      shell: bash
+      env:
+        PLAN_JSON: ci-out/plan.json
+        COST_BUDGET_USD: ${{ inputs.budget-usd }}
+        COST_BYPASS: ${{ inputs.cost-bypass }}
+      run: |
+        set +e
+        npm run --silent gate:cost 2>&1 | tee ci-out/cost.log
+        code=${PIPESTATUS[0]}
+        set -e
+        {
+          echo "cost-plan-usd=$(sed -n 's/^plan-usd=//p' ci-out/cost.log)"
+          echo "cost-budget-usd=$(sed -n 's/^budget-usd=//p' ci-out/cost.log)"
+          echo "cost-gate=$(sed -n 's/^gate=//p' ci-out/cost.log)"
+        } > ci-out/cost.env
+        # Мітка обходить лише «дорого» (код 1). Код 2 («не зміг порахувати») не обходиться ніколи.
+        if [ "$code" -eq 1 ] && [ "$COST_BYPASS" = "true" ]; then
+          echo "::warning::Гейт вартості пропущено міткою cost-approved: план дорожчий за бюджет"
+          exit 0
+        fi
+        exit "$code"
+
+    - name: Pulumi up (infra/ -> kind)
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        PULUMI_STACK_NAME: ci
+        ROLLOUT_PROFILE: zero
+        ROLLOUT_REV: '1'
+      run: |
+        bash scripts/with-secrets.sh dev bash scripts/pulumi.sh up
+        kubectl --context kind-hw28 -n marketplace rollout status deployment/marketplace-api --timeout=180s
+
+    - name: demo:rollout (gate, failed=0)
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        PULUMI_STACK_NAME: ci
+        ROLLOUT_PROFILE: zero
+        DEMO_MIN_REQUESTS: ${{ inputs.min-requests }}
+      run: |
+        set +e
+        npm run --silent demo:rollout 2>&1 | tee ci-out/rollout.txt
+        code=${PIPESTATUS[0]}
+        node scripts/ci-evidence.mjs rollout ci-out/rollout.txt >> ci-out/deploy.env
+        exit "$code"
+
+    - name: Verify deployed digest and secrets in the manifest
+      if: ${{ !cancelled() }}
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+      run: |
+        expected="${IMAGE##*@}"
+        kubectl --context kind-hw28 -n marketplace get deployment marketplace-api -o json > ci-out/deployment.json
+        ids="$(kubectl --context kind-hw28 -n marketplace get pods -l app=marketplace-api -o jsonpath='{range .items[*]}{.status.containerStatuses[0].imageID}{"\n"}{end}')"
+        echo "imageID pods:"
+        echo "$ids"
+        deployed="$(printf '%s\n' "$ids" | sed -E 's/.*@//' | sort -u)"
+        echo "deployed-digest=${deployed}" >> ci-out/deploy.env
+        if [ "$deployed" != "$expected" ]; then
+          echo "digest не збігається: збудовано ${expected}, у кластері ${deployed}" >&2
+          exit 1
+        fi
+        line="$(node scripts/ci-evidence.mjs secret-count ci-out/deployment.json)"
+        echo "$line" | tee -a ci-out/deploy.env
+        test "$line" = "secret-in-manifest=0"
