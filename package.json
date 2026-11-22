@@ -43,6 +43,8 @@
     "gate:contract": "node scripts/gate-contract.mjs",
     "gate:arch": "depcruise --config .dependency-cruiser.cjs src",
     "demo:gates": "node scripts/demo-gates.mjs",
+    "demo:oidc": "node scripts/demo-oidc.mjs",
+    "gate:oidc": "node scripts/oidc-gate.mjs",
     "cluster:up": "bash scripts/cluster-up.sh",
     "cluster:down": "kind delete cluster --name hw28",
     "up": "bash scripts/with-secrets.sh dev bash scripts/pulumi.sh up",

@@ -1,0 +1,9 @@
+{
+    "description": "Умова довіри конвеєра: кого пускаємо до джоб, що отримують права. Ті самі чотири рядки, що в trust policy хмарної ролі: issuer (чий підпис довіряємо), audience (кому виписано токен), subjects (які саме джоби). Без точного sub перші два лишаються зеленими, і деплоїти зможе будь-який репозиторій.",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "audience": "marketplace-api-deploy",
+    "subjects": [
+        "repo:kfsh0605/marketplace-api:environment:staging",
+        "repo:kfsh0605/marketplace-api:environment:prod"
+    ]
+}
