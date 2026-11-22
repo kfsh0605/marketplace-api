@@ -58,7 +58,7 @@ export async function startDemoApp(): Promise<DemoApp> {
                 body: options.body === undefined ? undefined : JSON.stringify(options.body),
             });
             const text = await response.text();
-            let body: any = null;
+            let body: any;
             try {
                 body = text ? JSON.parse(text) : null;
             } catch {
