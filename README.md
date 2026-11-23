@@ -1921,7 +1921,16 @@ GitHub маскує в лозі `***` лише **точні** значення �
     secret-in-manifest=0
     gate-scan-exit=0
 
-(у прогонах після виправлення в `evidence.txt` додатково `scanned-digest`, `cost-baseline-usd`, `cost-delta-usd`.)
+Прогін після виправлення за фідбеком (9 з 9 джоб, https://github.com/kfsh0605/marketplace-api/actions/runs/45216344132, голова PR `9acaf2c`): у `evidence.txt` додатково
+
+    scanned-digest=sha256:24ba4e4c95320a820833ac935663cf668e3934deeb9a2b0cd9417c16d81b8789
+    cost-baseline-usd=5.04
+    cost-plan-usd=5.04
+    cost-delta-usd=0.00
+    cost-budget-usd=10.00
+    cost-gate=pass
+
+`built-digest`, `scanned-digest` і `deployed-digest` однакові (`sha256:24ba4e4c…8789`), `build-invocations=1`, `rollout` 14579 з 14579, `failed=0`. База (`main`) і план однакові, тому зміна `0.00`.
 
 ### Команди
 
