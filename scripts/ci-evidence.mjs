@@ -107,10 +107,10 @@ function assemble(argv) {
         ['head-sha', process.env.HEAD_SHA ?? ''],
     ]);
     const order = [
-        'image-ref', 'built-digest', 'deployed-digest', 'build-invocations', 'creds-source',
+        'image-ref', 'built-digest', 'scanned-digest', 'deployed-digest', 'build-invocations', 'creds-source',
         'oidc-iss', 'oidc-aud', 'oidc-sub', 'oidc-sig-verified',
         'rollout-requests', 'rollout-ok', 'rollout-failed', 'rollout-seconds',
-        'secret-in-manifest', 'gate-scan-exit', 'cost-plan-usd', 'cost-budget-usd', 'cost-gate',
+        'secret-in-manifest', 'gate-scan-exit', 'cost-baseline-usd', 'cost-plan-usd', 'cost-delta-usd', 'cost-budget-usd', 'cost-gate',
     ];
     merged.set('build-invocations', String(invocations));
 

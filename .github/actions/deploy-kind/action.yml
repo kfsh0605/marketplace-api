@@ -1,6 +1,6 @@
 name: deploy-kind
 description: >
-  Піднімає kind у раннері, ганяє pulumi preview, гейт вартості, pulumi up програми infra/ (ДЗ №28) і demo:rollout.
+  Піднімає kind у раннері, ганяє pulumi preview (цієї гілки й базової), гейт вартості за ЗМІНОЮ, pulumi up програми infra/ (ДЗ №28) і demo:rollout.
   Образ береться за digest з виходу джоби збірки. Усі файли доказів лягають у ci-out/.
 
 inputs:
@@ -8,9 +8,14 @@ inputs:
     description: Повне посилання образ@sha256:digest
     required: true
   budget-usd:
-    description: Місячний бюджет для гейту вартості
+    description: Дозволене ЗБІЛЬШЕННЯ місячної вартості (план цієї гілки мінус план бази), $/міс
     required: false
     default: '10'
+  base-ref:
+    description: >
+      З чим порівнювати вартість: гілка (main) або повний sha базового коміту. Для PR це гілка, у яку зливаємо;
+      після злиття - коміт main перед цим злиттям. Порожнє значення - помилка: гейт не вгадує базу.
+    required: true
   min-requests:
     description: DEMO_MIN_REQUESTS для demo:rollout
     required: false
@@ -65,10 +70,36 @@ runs:
         mkdir -p ci-out
         bash scripts/with-secrets.sh dev bash scripts/pulumi.sh preview --json --show-sames > ci-out/plan.json
 
+    # База порівняння: той самий preview, але з infra/ БАЗОВОГО коміту, у власному файловому бекенді (свій каталог,
+    # свій стан), з тими самими випадковими секретами. Обидва плани «з нуля», тож різниця = саме зміна коду infra/.
+    - name: Baseline plan (infra/ of the base commit)
+      shell: bash
+      env:
+        BASE_REF: ${{ inputs.base-ref }}
+        IMAGE: ${{ inputs.image }}
+        PULUMI_STACK_NAME: ci
+        ROLLOUT_PROFILE: zero
+        ROLLOUT_REV: '1'
+      run: |
+        if [ -z "$BASE_REF" ]; then
+          echo "base-ref не задано: гейт вартості не знає, з чим порівнювати" >&2
+          exit 2
+        fi
+        mkdir -p ci-out
+        git fetch --no-tags --depth=1 origin "$BASE_REF"
+        base_dir="$RUNNER_TEMP/base"
+        git worktree add --detach "$base_dir" FETCH_HEAD
+        base_sha="$(git -C "$base_dir" rev-parse HEAD)"
+        test -f "$base_dir/infra/index.ts" || { echo "у базі ${base_sha} немає infra/index.ts" >&2; exit 2; }
+        echo "cost-baseline-commit=${base_sha}" > ci-out/baseline.env
+        npm ci --prefix "$base_dir/infra"
+        bash scripts/with-secrets.sh dev bash "$base_dir/scripts/pulumi.sh" preview --json --show-sames > ci-out/plan-base.json
+
     - name: Cost gate
       shell: bash
       env:
         PLAN_JSON: ci-out/plan.json
+        BASELINE_PLAN_JSON: ci-out/plan-base.json
         COST_BUDGET_USD: ${{ inputs.budget-usd }}
         COST_BYPASS: ${{ inputs.cost-bypass }}
       run: |
@@ -77,13 +108,15 @@ runs:
         code=${PIPESTATUS[0]}
         set -e
         {
+          echo "cost-baseline-usd=$(sed -n 's/^baseline-usd=//p' ci-out/cost.log)"
           echo "cost-plan-usd=$(sed -n 's/^plan-usd=//p' ci-out/cost.log)"
+          echo "cost-delta-usd=$(sed -n 's/^delta-usd=//p' ci-out/cost.log)"
           echo "cost-budget-usd=$(sed -n 's/^budget-usd=//p' ci-out/cost.log)"
           echo "cost-gate=$(sed -n 's/^gate=//p' ci-out/cost.log)"
         } > ci-out/cost.env
         # Мітка обходить лише «дорого» (код 1). Код 2 («не зміг порахувати») не обходиться ніколи.
         if [ "$code" -eq 1 ] && [ "$COST_BYPASS" = "true" ]; then
-          echo "::warning::Гейт вартості пропущено міткою cost-approved: план дорожчий за бюджет"
+          echo "::warning::Гейт вартості пропущено міткою cost-approved: зміна вартості більша за дозволену"
           exit 0
         fi
         exit "$code"

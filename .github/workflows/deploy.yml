@@ -1,6 +1,7 @@
 name: deploy
 
-# Деплой після злиття в main (і вручну). Образ збирається тим самим build.yml, а деплоїться за digest з його виходу.
+# Деплой після злиття в main (і вручну). Образ тут НЕ збирається: main лише просуває (promote) digest, який у PR уже
+# зібрали, просканували й викотили. Перезбірка після злиття дала б нові байти, яких ніхто не сканував.
 # schedule тут немає: ручний запуск (workflow_dispatch) і push у main - єдині тригери.
 on:
   push:
@@ -15,15 +16,72 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: build (once)
+  resolve:
+    name: resolve (digest, перевірений у PR)
+    runs-on: ubuntu-latest
+    # Права мінімальні й лише тут: actions: read - щоб знайти прогін і скачати його артефакт, pull-requests: read - щоб
+    # знайти PR коміту, packages: read - щоб переконатись, що digest є в GHCR. Жодного write.
     permissions:
       contents: read
-      packages: write
-    uses: ./.github/workflows/build.yml
+      actions: read
+      pull-requests: read
+      packages: read
+    outputs:
+      ref: ${{ steps.verify.outputs.ref }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Find the merged PR and its green pipeline run
+        id: find
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/ci-promote.mjs find
+
+      - name: Download pipeline-evidence of that run
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: pipeline-evidence
+          path: promote-in
+          run-id: ${{ steps.find.outputs.run-id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify the evidence (built = scanned = deployed, gates green)
+        id: verify
+        env:
+          PR_HEAD_SHA: ${{ steps.find.outputs.pr-head-sha }}
+          PR_NUMBER: ${{ steps.find.outputs.pr-number }}
+          PR_RUN_ID: ${{ steps.find.outputs.run-id }}
+          COST_APPROVED: ${{ steps.find.outputs.cost-approved }}
+        run: node scripts/ci-promote.mjs verify --evidence promote-in/evidence.txt --out ci-out
+
+      - name: Log in to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Make sure the digest still exists in the registry
+        env:
+          REF: ${{ steps.verify.outputs.ref }}
+          DIGEST: ${{ steps.verify.outputs.digest }}
+        run: |
+          found="$(docker buildx imagetools inspect "$REF" --format '{{.Manifest.Digest}}')"
+          echo "registry: ${found}"
+          test "$found" = "$DIGEST"
+
+      - name: Upload promote evidence part
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: part-promote
+          path: ci-out/
+          if-no-files-found: ignore
 
   oidc:
     name: gate OIDC (signature + policy)
+    needs: resolve
     runs-on: ubuntu-latest
     environment: prod
     permissions:
@@ -48,18 +106,35 @@ jobs:
 
   deploy:
     name: deploy to kind (preview, cost gate, up, rollout)
-    needs: [build, oidc]
+    needs: [resolve, oidc]
     runs-on: ubuntu-latest
     environment: prod
     timeout-minutes: 40
     steps:
+      # fetch-depth: 2 - щоб у разі ручного запуску мати батьківський коміт для бази порівняння вартості
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
 
-      - name: Deploy by digest
+      # База гейта вартості: main ДО цього злиття. Для push це github.event.before, для ручного запуску - перший батько.
+      - name: Base commit for the cost gate
+        id: base
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            sha="$BEFORE"
+          else
+            sha="$(git rev-parse HEAD^1)"
+          fi
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy by the promoted digest
         uses: ./.github/actions/deploy-kind
         with:
-          image: ${{ needs.build.outputs.ref }}
+          image: ${{ needs.resolve.outputs.ref }}
+          base-ref: ${{ steps.base.outputs.sha }}
 
       - name: Upload deploy evidence part
         if: ${{ always() }}
