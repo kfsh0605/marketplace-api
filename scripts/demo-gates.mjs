@@ -28,6 +28,27 @@ function run(label, args, env = {}) {
     if (process.env.DEMO_GATES_VERBOSE === '1') {
         process.stderr.write(`${result.stdout ?? ''}${result.stderr ?? ''}`);
     }
+    return { code, output: `${result.stdout ?? ''}${result.stderr ?? ''}` };
+}
+
+// Скорочення для місць, де потрібен лише код виходу.
+const exit = (label, args, env) => run(label, args, env).code;
+
+// tsc 6.x не читає tsconfig.json, якщо файл названо в командному рядку, і падає з TS5112 (код 1)
+// навіть на коректному файлі. Тому --ignoreConfig, а опції, які раніше давав tsconfig, передаємо явно.
+const TSC_FILE_OPTIONS = ['--ignoreConfig', '--noEmit', '--strict', '--target', 'ES2021', '--module', 'commonjs', '--skipLibCheck'];
+
+// «Зламано» тільки тоді, коли гейт упав саме через тип: код не 0 І в виводі очікуваний код помилки.
+// Інакше (як із TS5112) червоний код виходу нічого не доводить — гейт міг впасти через конфіг.
+function expectDiagnostic(label, args, diagnostic) {
+    const { code, output } = run(label, args);
+    if (code === 0) {
+        return 0;
+    }
+    if (!output.includes(diagnostic)) {
+        console.error(`  ${label}: код ${code}, але в виводі немає ${diagnostic} - впало не на типі`);
+        return -1;
+    }
     return code;
 }
 
@@ -50,20 +71,25 @@ try {
     console.error('сходинка 1: типи й стиль');
     results.types = {
         ok: worst(
-            run('tsc --noEmit', [TSC, '--noEmit']),
-            run('tsc --noEmit (тести)', [TSC, '--noEmit', '-p', 'test/tsconfig.json']),
-            run('eslint', [ESLINT, 'src', 'test', '--max-warnings', '0']),
+            exit('tsc --noEmit', [TSC, '--noEmit']),
+            exit('tsc --noEmit (тести)', [TSC, '--noEmit', '-p', 'test/tsconfig.json']),
+            exit('tsc на коректному файлі', [TSC, ...TSC_FILE_OPTIONS, 'fixtures/gates/types-ok.ts']),
+            exit('eslint', [ESLINT, 'src', 'test', '--max-warnings', '0']),
         ),
-        broken: run('tsc на зламаному вході', [TSC, '--noEmit', '--skipLibCheck', 'fixtures/gates/types-broken.ts']),
+        broken: expectDiagnostic(
+            'tsc на зламаному вході (чекаємо TS2322)',
+            [TSC, ...TSC_FILE_OPTIONS, 'fixtures/gates/types-broken.ts'],
+            'TS2322',
+        ),
     };
 
     console.error('сходинка 2: контракт (oasdiff)');
     results.contract = {
-        ok: run('oasdiff, спека проти себе', ['scripts/gate-contract.mjs'], {
+        ok: exit('oasdiff, спека проти себе', ['scripts/gate-contract.mjs'], {
             BASE_SPEC: 'openapi.yaml',
             REVISION_SPEC: 'openapi.yaml',
         }),
-        broken: run('oasdiff, прибрано totalCents', ['scripts/gate-contract.mjs'], {
+        broken: exit('oasdiff, прибрано totalCents', ['scripts/gate-contract.mjs'], {
             BASE_SPEC: 'openapi.yaml',
             REVISION_SPEC: brokenContract(tempDir),
         }),
@@ -71,8 +97,8 @@ try {
 
     console.error('сходинка 3: архітектура (dependency-cruiser)');
     results.arch = {
-        ok: run('depcruise src', [DEPCRUISE, '--config', '.dependency-cruiser.cjs', 'src']),
-        broken: run('depcruise на зламаному вході', [
+        ok: exit('depcruise src', [DEPCRUISE, '--config', '.dependency-cruiser.cjs', 'src']),
+        broken: exit('depcruise на зламаному вході', [
             DEPCRUISE,
             '--config',
             '.dependency-cruiser.cjs',
@@ -83,8 +109,8 @@ try {
     console.error('сходинка 4: образ (scan із порогом)');
     const scanEnv = { SCAN_REPORT: 'fixtures/gates/trivy-report.json' };
     results.image = {
-        ok: run('scan, SCAN_MAX=99999', ['scripts/scan.mjs'], { ...scanEnv, SCAN_MAX: '99999' }),
-        broken: run('scan, SCAN_MAX=-1', ['scripts/scan.mjs'], { ...scanEnv, SCAN_MAX: '-1' }),
+        ok: exit('scan, SCAN_MAX=99999', ['scripts/scan.mjs'], { ...scanEnv, SCAN_MAX: '99999' }),
+        broken: exit('scan, SCAN_MAX=-1', ['scripts/scan.mjs'], { ...scanEnv, SCAN_MAX: '-1' }),
     };
 } finally {
     rmSync(tempDir, { recursive: true, force: true });
@@ -94,7 +120,7 @@ let onesided = 0;
 for (const [step, { ok, broken }] of Object.entries(results)) {
     console.log(`${step}-ok=${ok}`);
     console.log(`${step}-broken=${broken}`);
-    if (ok !== 0 || broken === 0) {
+    if (ok !== 0 || broken === 0 || broken < 0) {
         onesided += 1;
     }
 }
