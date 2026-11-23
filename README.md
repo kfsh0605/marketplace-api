@@ -1741,7 +1741,7 @@ JSON лежить у репозиторії (`observability/grafana/dashboards/r
 Правильна схема для GitHub Actions це OIDC: короткоживучий токен замість ключа. На цьому акаунті вона неможлива: SCP `DenyIAMRestrictedActions` забороняє `iam:*Provider*`, тож OIDC-провайдера не створити ні на Free, ні на Paid. Доказ у кожному прогоні: крок `Proof - OIDC providers are blocked by a service control policy` виконує `aws iam list-open-id-connect-providers` (роль має цей дозвіл) і AWS відповідає явною забороною організації; у `evidence/iam.txt` це `scp-deny-oidc=1`. Схема узгоджена з викладачем:
 
 - IAM-користувач `hw31-ci` має єдину дію: `sts:AssumeRole` + `sts:TagSession` на роль `hw31-ci-teardown`; уся робота йде вже під роллю (твердження `Arn` з `assumed-role` у логу).
-- Ключ користувача лежить **лише** в секретах GitHub Environment `teardown` (`CI_KEY_ID`, `CI_KEY_SECRET`), у репозиторії та в стані Pulumi його немає. Його створює не Pulumi, а `npm run ci:key`: скрипт одразу передає ключ у `gh secret set`, а якщо запис не вдався, видаляє новий ключ. Environment дозволяє гілки `main` і `hw-31`.
+- Ключ користувача лежав **лише** в секретах GitHub Environment `teardown` (`CI_KEY_ID`, `CI_KEY_SECRET`), у репозиторії та в стані Pulumi його не було. Його створював не Pulumi, а `npm run ci:key`: скрипт одразу передавав ключ у `gh secret set`, а якщо запис не вдався, видаляв новий ключ. **Після здачі ключ видалено** командою `npm run ci:key:delete` (вона знімає всі ключі `hw31-ci` в IAM і обидва секрети Environment). Перевірка нуля: `aws iam list-access-keys --user-name hw31-ci` дає порожній список, `gh secret list --env teardown` і `gh secret list` порожні. Ключів хмари в налаштуваннях репозиторію немає.
 - Workflow запускається лише за розкладом і вручну; тригерів, що віддають секрети коду з чужих форків, немає, а дії закріплено за SHA.
 - Довіра до GitHub OIDC (з умовами `aud` і `sub` для `main` та `hw-31`) вже описана в ролі за прапорцем `hw31:ciOidc`; AWS прийняв її навіть без провайдера. Коли політику організації знімуть, достатньо створити провайдера, а ключ прибрати.
 
@@ -1776,11 +1776,11 @@ JSON лежить у репозиторії (`observability/grafana/dashboards/r
 
 ### Після здачі
 
-    npm run ci:key:delete      # видалити ключ hw31-ci і обидва секрети Environment teardown
+    npm run ci:key:delete      # видалити ключ hw31-ci і обидва секрети Environment teardown (виконано в ДЗ №32)
     npm run destroy:base       # знести постійну частину
     # бакет зі станом видаляється вручну (aws s3 rb s3://hw31-pulumi-state-<id> --force)
 
-У ДЗ №32 воркфлоу нічного прибирання винесено з `.github/workflows` до `docs/teardown.workflow.yml.disabled` (ключ AWS суперечить вимозі «жодних довгоживучих ключів хмари»). Прибирання вручну: `bash scripts/teardown.sh`.
+У ДЗ №32 воркфлоу нічного прибирання винесено з `.github/workflows` до `docs/teardown.workflow.yml.disabled` (ключ AWS суперечить вимозі «жодних довгоживучих ключів хмари»). Прибирання вручну: `bash scripts/teardown.sh`. Ключ видалено, тож нічний `teardown.yml` (поки він ще лежить у `main`) на кроці входу в AWS падає; після злиття `hw-32` файла в `.github/workflows` уже немає.
 
 ## CI/CD (ДЗ №32)
 
@@ -1800,9 +1800,9 @@ JSON лежить у репозиторії (`observability/grafana/dashboards/r
 | Файл | Тригер | Призначення |
 |------|--------|-------------|
 | `.github/workflows/pipeline.yml` | `pull_request` → `main` | усі гейти, збірка, деплой у kind, evidence |
-| `.github/workflows/deploy.yml` | `push` у `main`, `workflow_dispatch` | збірка, гейт OIDC (environment `prod`), деплой |
-| `.github/workflows/build.yml` | `workflow_call` | **єдине** місце, де збирається образ; віддає `digest` |
-| `.github/actions/deploy-kind/action.yml` | локальна дія | kind у раннері, `pulumi preview`, гейт вартості, `pulumi up`, `demo:rollout` |
+| `.github/workflows/deploy.yml` | `push` у `main`, `workflow_dispatch` | **не збирає образ**: `resolve` знаходить PR і його зелений прогін, перевіряє evidence і бере звідти digest; далі гейт OIDC (environment `prod`) і деплой цього digest |
+| `.github/workflows/build.yml` | `workflow_call` | **єдине** місце, де збирається образ (викликається лише з `pipeline.yml`); віддає `digest` |
+| `.github/actions/deploy-kind/action.yml` | локальна дія | kind у раннері, `pulumi preview` (гілки й бази), гейт вартості за зміною, `pulumi up`, `demo:rollout` |
 
 `schedule` у конвеєрі немає. Старий `ci.yml` влито в `pipeline.yml` (джоби `tests` і `contract`) і видалено, щоб на голові PR не було другого воркфлоу з успішним прогоном без артефакту.
 
@@ -1815,7 +1815,7 @@ JSON лежить у репозиторії (`observability/grafana/dashboards/r
 | architecture | `npm run gate:arch` | `dependency-cruiser`: правила `domain-not-to-http`, `prod-not-to-demo`, `src-not-to-test` | `arch-ok`, `arch-broken` |
 | image | `npm run scan` | знайдено більше вразливостей CRITICAL/HIGH із виправленням, ніж `SCAN_MAX` (у конвеєрі 7) | `image-ok` (`SCAN_MAX=99999`), `image-broken` (`SCAN_MAX=-1`) |
 
-Бінарник `oasdiff` завантажується за закріпленою версією з перевіркою sha256 (`scripts/lib/oasdiff.mjs`). Жоден гейт не має `continue-on-error` чи `|| true`. `demo:gates` друкує для кожного з чотирьох кроків пару `<крок>-ok=0` / `<крок>-broken=<код ≠ 0>` і підсумок `steps=4`, `one-sided=0` (однобічних гейтів немає).
+Бінарник `oasdiff` завантажується за закріпленою версією з перевіркою sha256 (`scripts/lib/oasdiff.mjs`). Жоден гейт не має `continue-on-error` чи `|| true`. `demo:gates` друкує для кожного з чотирьох кроків пару `<крок>-ok=0` / `<крок>-broken=<код ≠ 0>` і підсумок `steps=4`, `one-sided=0` (однобічних гейтів немає). Сходинка «типи» перевіряє не лише код виходу: `tsc` 6.x, коли файл названо в командному рядку, а `tsconfig.json` лежить поруч, падає з `TS5112` і кодом 1 навіть на коректному файлі, тож «зламаний» вхід перевіряється з `--ignoreConfig` (опції `--strict --target ES2021 --module commonjs --skipLibCheck` передано явно), коректний `fixtures/gates/types-ok.ts` дає код 0, а зламаний `types-broken.ts` дає `TS2322`. Якщо в виводі зламаного входу немає `TS2322`, демо рахує сходинку однобічною: падіння з іншої причини нічого не доводить.
 
 ### Пини дій
 
@@ -1824,6 +1824,8 @@ JSON лежить у репозиторії (`observability/grafana/dashboards/r
 ### Build once, promote by digest
 
 Образ збирає один крок `docker/build-push-action` у `build.yml`. Джоба віддає `digest` (однорядкове значення) і `ref = ghcr.io/<owner>/<repo>@sha256:…`. Теги: `${{ github.sha }}` (тег рухомий, тому тільки для людей). `scan` тягне образ за digest, `deploy` ставить у кластер той самий `ref`, а після `pulumi up` звіряє `imageID` подів із зібраним digest (`deployed-digest`). Реєстр: GHCR, вхід через `GITHUB_TOKEN`; пакет публічний (одноразово змінено в налаштуваннях пакета), тому kind у раннері й грейдер тягнуть образ без облікових даних. `build-invocations` у evidence рахується як кількість рядків `build.log` (по одному на виклик збірки).
+
+**Після злиття в `main` образ не збирається.** `deploy.yml` не викликає `build.yml`: у ньому немає жодної збірки, тож образ, який ніхто не сканував, туди потрапити не може. Натомість джоба `resolve` (права `contents`, `actions`, `pull-requests`, `packages` лише на читання) робить `scripts/ci-promote.mjs find`: за `GITHUB_SHA` знаходить злитий PR (`GET /commits/{sha}/pulls`, потрібен `merge_commit_sha`, що збігається), а за головою PR останній успішний прогін `pipeline.yml` від події `pull_request` (`GET /actions/runs?head_sha=…`). Потім `actions/download-artifact` з `run-id` і `github-token` скачує `pipeline-evidence` того прогону, а `ci-promote.mjs verify` вимагає: `head-sha` = голова PR; `built-digest` = `scanned-digest` = `deployed-digest`; `build-invocations=1`; `gate-scan-exit=0`; `creds-source=oidc` і `oidc-sig-verified=1`; `rollout-failed=0` при `rollout-requests>0`; `secret-in-manifest=0`; `cost-gate=pass` (або `fail` за наявності мітки `cost-approved` на PR). Далі `docker buildx imagetools inspect` підтверджує, що digest ще є в GHCR. Якщо PR немає (прямий push у `main`) або прогону немає, `resolve` падає, а `oidc` і `deploy` не стартують. Деплоїться `ref` з evidence, тобто ті самі байти, що пройшли гейти в PR. `ci-promote.mjs` записує `promote.env` (`promoted-from-pr`, `promoted-from-run`, `promoted-ref`, `promoted-source-tree-match`) у артефакт `part-promote`. Межа: образ перевірено на merge-коміті PR; якщо `main` пішов далі за PR, вміст `main` не збігається з тим, що тестували (`promoted-source-tree-match=false`, у лозі попередження). Лікується налаштуванням «Require branches to be up to date before merging». `npm run demo:promote` показує обидва боки на готовій картці: справна проходить, а зіпсована в одному місці (інший digest, червоний скан, дві збірки, чужий коміт, `failed>0`, секрет у маніфесті, дорогий план без мітки) відхиляється зі своєю причиною.
 
 ### OIDC замість довгоживучого ключа
 
@@ -1849,7 +1851,7 @@ JSON лежить у репозиторії (`observability/grafana/dashboards/r
 |---------------------------|---------|--------|-------|
 | `GITHUB_TOKEN` | видається раннеру на час прогону, ніде не зберігається | вхід у GHCR (`docker/login-action`) | `packages: write` лише в `build.yml`, `packages: read` у `scan` |
 
-Інших `secrets.*` у воркфлоу немає (`PACT_BROKER_TOKEN` прибрано: брокер у CI локальний, `127.0.0.1:9292`, без авторизації). Хмарного ключа теж немає: вхід у «хмару» тільки через OIDC. Секрети Environment `teardown` з ДЗ №31 жоден воркфлоу цієї гілки не читає.
+Інших `secrets.*` у воркфлоу немає (`PACT_BROKER_TOKEN` прибрано: брокер у CI локальний, `127.0.0.1:9292`, без авторизації). Хмарного ключа теж немає: вхід у «хмару» тільки через OIDC. Секрети Environment `teardown` з ДЗ №31 видалено (`npm run ci:key:delete`): ключів хмари в налаштуваннях репозиторію нуль (`gh secret list` і `gh secret list --env teardown` порожні), жоден воркфлоу цієї гілки їх не читає.
 
 **Секрети застосунку** (значення зі «сховища», ДЗ №11). У CI їх створює `scripts/ci-vault.sh` випадковими значеннями на час прогону (у `secrets/*` і `secrets/jwt/dev/`), а далі їх читає той самий `scripts/with-secrets.sh dev …`, що й локально. У GitHub Secrets цих значень немає.
 
@@ -1873,15 +1875,15 @@ GitHub маскує в лозі `***` лише **точні** значення �
 | Environment | Використовується | Обмеження |
 |-------------|------------------|-----------|
 | `staging` | джоба `oidc` у `pipeline.yml` (PR-прогони) | немає |
-| `prod` | `oidc` і `deploy` у `deploy.yml` | лише гілка `main` |
+| `prod` | `oidc` і `deploy` у `deploy.yml` (після `resolve`) | лише гілка `main` |
 
 Створюються `bash scripts/setup-environments.sh` (потрібні `gh` і права адміністратора; безпечно повторювати). `sub` залежить від імені environment, тому `oidc/policy.json` дозволяє обидва.
 
 ### IaC у конвеєрі й гейт вартості
 
-Кластер `kind` піднімається в раннері (`helm/kind-action`, кластер `hw28`, `k8s/kind-config.yaml`), Pulumi працює з файловим бекендом (`PULUMI_BACKEND_URL=file://…`, стек `ci`, без акаунта Pulumi). Порядок: `pulumi preview --json --show-sames` → `plan.json` → `npm run gate:cost` → `pulumi up` (програма `infra/`, `kubectl apply` вручну немає) → `npm run demo:rollout` (`DEMO_MIN_REQUESTS=2000`, профіль `zero`, `failed` має бути `0`; між двома `pulumi up` змінюється `ROLLOUT_REV`, а з ним шаблон пода) → перевірка digest і `secret-in-manifest`.
+Кластер `kind` піднімається в раннері (`helm/kind-action`, кластер `hw28`, `k8s/kind-config.yaml`), Pulumi працює з файловим бекендом (`PULUMI_BACKEND_URL=file://…`, стек `ci`, без акаунта Pulumi). Порядок: `pulumi preview --json --show-sames` → `plan.json` → `pulumi preview` того ж `infra/` з базового коміту → `plan-base.json` → `npm run gate:cost` → `pulumi up` (програма `infra/`, `kubectl apply` вручну немає) → `npm run demo:rollout` (`DEMO_MIN_REQUESTS=2000`, профіль `zero`, `failed` має бути `0`; між двома `pulumi up` змінюється `ROLLOUT_REV`, а з ним шаблон пода) → перевірка digest і `secret-in-manifest`.
 
-`src/mapping.ts` переводить `plan.json` у долари на місяць. Ціниться запланований стан (`create`, `update`, `same`, `replace`; `delete` не рахується): кожен `Deployment`/`StatefulSet` дає `репліки × (requests.cpu × ставка vCPU + requests.memory × ставка GiB) × 730 год`. Якщо `requests` немає, береться `limits` (так робить Kubernetes). `Namespace`, `Secret`, `Service`, `PodDisruptionBudget` і `HorizontalPodAutoscaler` у моделі коштують 0.
+`src/mapping.ts` переводить `plan.json` у долари на місяць. Ціниться запланований стан (`create`, `update`, `same`, `replace`; `delete` не рахується): кожен `Deployment`/`StatefulSet` дає `репліки × (requests.cpu × ставка vCPU + requests.memory × ставка GiB) × 730 год`. Якщо `requests` немає, береться `limits` (так робить Kubernetes). `Namespace`, `Secret`, `Service`, `PodDisruptionBudget` і `HorizontalPodAutoscaler` у моделі коштують 0. **Гейт міряє зміну, а не суму**: `delta = plan-usd − baseline-usd`, де `baseline-usd` це вартість того самого `infra/`, що в базовій гілці. Для PR база це `main` (`base-ref: ${{ github.base_ref }}`), після злиття це коміт `main` перед злиттям (`github.event.before`, для ручного запуску перший батько). Дія `deploy-kind` робить `git fetch` бази, `git worktree add`, `npm ci --prefix` його `infra/` і запускає `pulumi preview --json --show-sames` у власному файловому бекенді з тими самими випадковими секретами; обидва плани «з нуля», тому різниця це саме зміна коду `infra/`. База без жодного навантаження дає `baseline-usd=0.00` (першого деплою це не ламає), а якщо `BASELINE_PLAN_JSON` задано, але порахувати базу не вдалося, гейт повертає код 2, а не рахує мовчки від нуля.
 
 | Ставка | Значення | Джерело |
 |--------|----------|---------|
@@ -1889,9 +1891,9 @@ GitHub маскує в лозі `***` лише **точні** значення �
 | GiB-година памʼяті | $0.004445 | https://aws.amazon.com/fargate/pricing/ |
 | годин на місяць | 730 | 24 × 365 / 12 |
 
-Ставки On-Demand AWS Fargate, Linux/x86, US East (N. Virginia), перевірено 22.11.2026 (на сторінці вказано ціни за секунду: $0.000011244 за vCPU і $0.000001235 за GiB, помножено на 3600). Кластер `kind` грошей не коштує, тому сума умовна: «стільки коштувало б те саме у хмарі». Приклад із першого прогону: 3 репліки × (50m CPU, 64Mi) = `plan-usd=5.04` при бюджеті `budget-usd=10.00`. Обмеження моделі: `HorizontalPodAutoscaler` росте до 4 реплік, а ціна рахується за `spec.replicas` Deployment.
+Ставки On-Demand AWS Fargate, Linux/x86, US East (N. Virginia), перевірено 22.11.2026 (на сторінці вказано ціни за секунду: $0.000011244 за vCPU і $0.000001235 за GiB, помножено на 3600). Кластер `kind` грошей не коштує, тому сума умовна: «стільки коштувало б те саме у хмарі». Приклад: 3 репліки × (50m CPU, 64Mi) = `plan-usd=5.04`; при базі з 2 репліками (`baseline-usd=3.36`) це `delta-usd=1.68` при дозволеному збільшенні `budget-usd=10.00`. Та сама інфраструктура з подвоєними репліками й CPU дає `plan-usd=18.95`, `delta-usd=13.91` і `gate=fail`. Обмеження моделі: `HorizontalPodAutoscaler` росте до 4 реплік, а ціна рахується за `spec.replicas` Deployment.
 
-Гейт друкує `budget-usd`, `plan-usd` (> 0), `gate=pass|fail`; коди виходу: `0` pass, `1` fail (дорожче за бюджет), `2` гейт не зміг порахувати (немає плану, невідомі значення, порожній план: нуль не вважається результатом). Числа порівнюються в центах, а не файли планів. Змінні: `PLAN_JSON`, `COST_BUDGET_USD`. `npm run demo:cost` ганяє `fixtures/cost/plan-ok.json` (pass) і `plan-heavy.json` (30 реплік по 1 CPU / 2Gi, fail).
+Гейт друкує `baseline=plan|none`, `baseline-usd`, `plan-usd` (> 0), `delta-usd`, `budget-usd`, `gate=pass|fail`; `budget-usd` це **дозволене збільшення** вартості, $/міс (зменшення проходить завжди). Коди виходу: `0` pass, `1` fail (зміна більша за дозволену), `2` гейт не зміг порахувати (немає плану чи бази, невідомі значення, порожній план: нуль не вважається результатом). Числа порівнюються в центах (`decide()` у `src/mapping.ts`, unit-тести в `test/unit/mapping.spec.ts`), а не файли планів. Змінні: `PLAN_JSON`, `BASELINE_PLAN_JSON` (необов'язкова: без неї `baseline-usd=0.00` і зміна дорівнює всій вартості, тож `COST_BUDGET_USD=0` дає fail, а `999999` дає pass), `COST_BUDGET_USD`. `npm run demo:cost` ганяє сім випадків: без бази `plan-ok` (pass) і `plan-heavy` (30 реплік по 1 CPU / 2Gi, fail); `plan-heavy` на базі `plan-heavy` (зміна 0, pass, хоча сума 1081.20 далеко за бюджетом); `plan-plus-one` на базі `plan-ok` (+1.68, pass); `plan-heavy` на базі `plan-ok` (+1077.84, fail); `plan-ok` на базі `plan-heavy` (зменшення, pass); `plan-ok` на базі без навантажень `plan-empty` (pass).
 
 Обхід гейта вартості лише міткою на PR (тільки для коду 1, код 2 не обходиться ніколи; у логу лишається `gate=fail` і попередження):
 
@@ -1899,7 +1901,7 @@ GitHub маскує в лозі `***` лише **точні** значення �
 
 ### Артефакт `pipeline-evidence`
 
-Фінальна джоба `evidence` (`if: always()`) збирає частини `part-*` усіх джоб і завантажує артефакт `pipeline-evidence`: `evidence.txt`, `deployment.json`, `plan.json`, `rollout.txt`, `build.log`. `head-sha` береться з `github.event.pull_request.head.sha` (на PR `github.sha` це merge-коміт). Значення першого зеленого прогону:
+Фінальна джоба `evidence` (`if: always()`) збирає частини `part-*` усіх джоб і завантажує артефакт `pipeline-evidence`: `evidence.txt`, `deployment.json`, `plan.json`, `rollout.txt`, `build.log`. Ключі `scanned-digest` (що саме просканували), `cost-baseline-usd` і `cost-delta-usd` додано в ДЗ №32 після перевірки; саме за ними `deploy.yml` потім упевнюється, що викочується той самий digest. `head-sha` береться з `github.event.pull_request.head.sha` (на PR `github.sha` це merge-коміт). Значення першого зеленого прогону:
 
     run-id=45060425205
     head-sha=ff5781f85f653e085f1ec8b1a918a254c719bcfa
@@ -1919,11 +1921,14 @@ GitHub маскує в лозі `***` лише **точні** значення �
     secret-in-manifest=0
     gate-scan-exit=0
 
+(у прогонах після виправлення в `evidence.txt` додатково `scanned-digest`, `cost-baseline-usd`, `cost-delta-usd`.)
+
 ### Команди
 
     npm run demo:gates                      # чотири гейти в обидва боки
     npm run demo:oidc                       # green / foreign-sub / bad-signature (+3 додаткові)
-    npm run demo:cost                       # гейт вартості pass і fail
+    npm run demo:cost                       # гейт вартості за зміною: 7 випадків, pass і fail
+    npm run demo:promote                    # просування digest із PR: справна картка проходить, зіпсовані ні
     bash scripts/pin-actions.sh check       # пини дій
     bash scripts/setup-environments.sh      # staging і prod (потрібен gh)
 
@@ -2050,6 +2055,7 @@ GitHub маскує в лозі `***` лише **точні** значення �
 | `.github/workflows/pipeline.yml`, `deploy.yml`, `build.yml` | Конвеєр ДЗ №32: гейти, збірка один раз, OIDC, деплой у kind, `pipeline-evidence`; `build.yml` єдине місце збірки образу |
 | `.github/actions/deploy-kind/action.yml` | Локальна дія: kind, `pulumi preview`/`up`, гейт вартості, `demo:rollout`, перевірка digest |
 | `scripts/oidc-gate.mjs`, `scripts/lib/oidc.mjs`, `oidc/policy.json`, `scripts/demo-oidc.mjs` | Гейт OIDC із перевіркою підпису за `jwks_uri`, політика допуску, `npm run demo:oidc` |
-| `src/mapping.ts`, `src/gate-cost.ts`, `fixtures/cost/`, `scripts/demo-cost.mjs` | Переклад `plan.json` у долари, `npm run gate:cost`, `npm run demo:cost` |
+| `src/mapping.ts`, `src/gate-cost.ts`, `fixtures/cost/`, `scripts/demo-cost.mjs` | Переклад `plan.json` у долари, рішення за зміною до бази (`decide()`), `npm run gate:cost`, `npm run demo:cost` |
+| `scripts/ci-promote.mjs`, `scripts/lib/promote.mjs`, `scripts/demo-promote.mjs`, `fixtures/promote/` | Просування digest із PR після злиття (пошук PR і прогону, перевірка evidence), `npm run demo:promote` |
 | `scripts/gate-contract.mjs`, `scripts/lib/oasdiff.mjs`, `.dependency-cruiser.cjs`, `eslint.config.mjs`, `scripts/demo-gates.mjs`, `fixtures/gates/` | Гейти якості й `npm run demo:gates` |
 | `scripts/ci-vault.sh`, `scripts/ci-evidence.mjs`, `scripts/pin-actions.sh`, `scripts/setup-environments.sh` | Випадкове сховище для CI, збирання evidence, перевірка пинів, створення environments |
