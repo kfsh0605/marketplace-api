@@ -159,3 +159,52 @@ export function estimatePlan(plan: unknown): Estimate {
 }
 
 export const toCents = (usd: number): number => Math.round(usd * 100) / 100;
+
+export interface CostDecisionInput {
+    /** Вартість плану цієї гілки (PR), $/міс. */
+    planUsd: number;
+    /** Вартість плану базової гілки, $/міс. Якщо бази немає, 0: тоді зміна дорівнює всій вартості. */
+    baselineUsd: number;
+    /** Дозволене ЗБІЛЬШЕННЯ місячної вартості, $/міс. */
+    budgetUsd: number;
+    /** Скільки Deployment/StatefulSet знайдено в плані цієї гілки. */
+    workloads: number;
+}
+
+export interface CostDecision {
+    planUsd: number;
+    baselineUsd: number;
+    deltaUsd: number;
+    budgetUsd: number;
+    pass: boolean;
+    /** Чому fail (порожньо, коли pass). */
+    reason: string;
+}
+
+/**
+ * Рішення гейта: міряємо ЗМІНУ (план мінус база), а не абсолютну суму.
+ * Усе рахується в центах, щоб 0.1 + 0.2 не давало сюрпризів на межі бюджету.
+ * Зменшення вартості (delta < 0) завжди проходить. План без жодного навантаження не вважається результатом.
+ */
+export function decide(input: CostDecisionInput): CostDecision {
+    const cents = (usd: number): number => Math.round(usd * 100);
+    const planCents = cents(input.planUsd);
+    const baselineCents = cents(input.baselineUsd);
+    const budgetCents = cents(input.budgetUsd);
+    const deltaCents = planCents - baselineCents;
+
+    let reason = '';
+    if (input.workloads === 0) {
+        reason = 'у плані немає жодного Deployment/StatefulSet, вартість 0 не є результатом';
+    } else if (deltaCents > budgetCents) {
+        reason = `зміна вартості +${(deltaCents / 100).toFixed(2)} $/міс перевищує дозволене збільшення ${(budgetCents / 100).toFixed(2)}`;
+    }
+    return {
+        planUsd: planCents / 100,
+        baselineUsd: baselineCents / 100,
+        deltaUsd: deltaCents / 100,
+        budgetUsd: budgetCents / 100,
+        pass: reason === '',
+        reason,
+    };
+}
