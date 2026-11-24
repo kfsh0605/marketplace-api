@@ -6,6 +6,10 @@ x-app: &app
     context: .
     dockerfile: docker/Dockerfile.app
   image: marketplace-api:compose
+  # Збирати образ при кожному `up`: без цього Compose бере вже наявний образ із тим самим тегом, навіть якщо він
+  # зібраний зі старого коду (так у чистому клоні контейнер `api` працював без нового коду й міграцій).
+  # Кеш шарів робить повторну збірку швидкою.
+  pull_policy: build
   restart: unless-stopped
   profiles: ["app"]
   volumes:
