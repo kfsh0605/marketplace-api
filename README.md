@@ -167,7 +167,7 @@ flowchart TB
     curl http://localhost:3000/health
     npm run demo:contour
 
-Зупинка зі збереженням даних: `docker compose --profile app down`; повне стирання разом із томами: `docker compose --profile app down -v`. Дані Postgres, RabbitMQ і `redis-queue` лежать у томах і переживають перезапуск; сховище файлів (MinIO) працює в `tmpfs` і перезапуск не переживає. Профіль `app` потрібен, щоб звичайний `docker compose up -d --wait` лишався інфраструктурним: на ньому тримаються демо ДЗ №19–22, яким не можна мати живого consumer на черзі.
+Зупинка зі збереженням даних: `docker compose --profile app down`; повне стирання разом із томами: `docker compose --profile app down -v`. Дані Postgres, RabbitMQ і `redis-queue` лежать у томах і переживають перезапуск; сховище файлів (MinIO) працює в `tmpfs` і перезапуск не переживає. Профіль `app` потрібен, щоб звичайний `docker compose up -d --wait` лишався інфраструктурним: на ньому тримаються демо ДЗ №19–22, яким не можна мати живого consumer на черзі. Під час першого `up` Compose може вивести рядки `pull access denied for marketplace-api`: він спершу пробує завантажити образ `marketplace-api:compose` із реєстру, не знаходить його й збирає локально з `docker/Dockerfile.app`. Це не помилка, `up` завершується кодом 0. Дані пережили `docker compose --profile app down` і повторний `up -d --wait`: `SELECT count(*) FROM users` дає `6` до і після, `/health` знову повертає `200` із `"database":"up"`.
 
 **Варіант для розробки: процеси на хості.** Файли `secrets/*.example` це dev-шаблони, значення в них навмисно не є секретами (домовленість курсу).
 
@@ -313,7 +313,7 @@ API слухає `http://localhost:3000`: Swagger на `/docs`, health на `/he
 | 11.5 Воркери | `npm run demo:workers`; `npm run demo:retry` | 12 задач розподілено між 4 воркерами порівну, дублів немає; після `40001` повтор транзакції |
 | 11.5 Realtime | `node scripts/realtime-demo.mjs` | `A_RECEIVED=1`, `B_RECEIVED=0`; з `--same-room` `B_RECEIVED=1` |
 | 11.6 Інфраструктура | `docker compose up -d --wait` | усі сервіси `healthy` |
-| 11.6 Запуск однією командою | `npm run bootstrap`, `docker compose --profile app up -d --wait`, далі `curl http://localhost:3000/health` і `npm run demo:contour` | усі сервіси `healthy` або `running`; `/health` дає `200`; `external-consumer=1 background-pending=1` |
+| 11.6 Запуск однією командою | `npm run bootstrap`, `docker compose --profile app up -d --wait`, далі `curl http://localhost:3000/health` і `npm run demo:contour` | усі сервіси `healthy` або `running`; `/health` дає `200`; `external-consumer=1 background-pending=1`; після `down` і `up -d --wait` кількість користувачів не змінюється |
 | 11.6 Образ | `npm run demo:image`; `npm run scan` | `stages=3 shell-inside=0 runtime-uid=65532`; `gate=pass`, а `SCAN_MAX=-1 npm run scan` дає `gate=fail` і код ≠ 0 |
 | 11.6 Розгортання | `npm run demo:rollout`; `npm run demo:pdb` | `failed=0` при `requests>=5000`; `evict-1=201 evict-2=429` |
 | 11.7 Health | `curl http://localhost:3000/health` | `200` зі станом БД і `uptime`; у вході для кластера `/healthz` і `/readyz` |
