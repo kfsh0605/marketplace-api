@@ -109,7 +109,7 @@ Marketplace API: бекенд маркетплейсу. У ньому є кат�
 ### Відомі межі системи
 
 - Вебхука платіжного провайдера немає (рядок 7 перевірки домену): підпис над сирим тілом, дедуп за id події й звірка суми не реалізовані.
-- Повний застосунок, `relay` і `consumer` у `docker compose` не входять: `docker compose up -d --wait` піднімає лише інфраструктуру, а три процеси запускаються окремими командами за Runbook.
+- Застосунок, `relay` і `consumer` у `docker compose` лежать за профілем `app` (`docker compose --profile app up -d --wait`), а не в стандартному наборі: так звичайний `up` лишається інфраструктурним, на ньому тримаються демо, яким не можна мати живого consumer. Образ цих контейнерів (`docker/Dockerfile.app`) має dev-залежності і не є production-образом.
 - Образ у кластері Kubernetes запускає `dist/k8s/server.js`: це HTTP-оболонка для перевірки розгортання (probes, rollout, graceful shutdown), а не повний Nest-застосунок.
 - Докладніше про межі кожної підсистеми: підрозділи «Відомі прогалини» в розділах Auth, Файли, Kubernetes, Observability, AWS.
 
@@ -157,7 +157,19 @@ flowchart TB
 
 Потрібні Docker, Node.js 22 і npm; на Windows усі команди виконуються в Git Bash.
 
-**Швидкий старт (з чистого клону).** Файли `secrets/*.example` це dev-шаблони, значення в них навмисно не є секретами (домовленість курсу).
+**Одна команда: усе в контейнерах (з чистого клону).** Потрібні лише Docker і Node.js (для `bootstrap`).
+
+    npm run bootstrap
+    docker compose --profile app up -d --wait
+
+`npm run bootstrap` (`scripts/bootstrap.mjs`) створює `.env` і файли-секрети з шаблонів і генерує dev-ключі JWT; нічого наявного він не перезаписує. Друга команда збирає образ (перший раз кілька хвилин) і піднімає інфраструктуру, а потім `api`, `relay` і `consumer`. `api` перед стартом сам виконує міграції, ідемпотентний seed і створює топологію RabbitMQ; `relay` і `consumer` чекають на його healthcheck (`depends_on: service_healthy`), тому на момент їх запуску схема й exchange уже готові. Команда повертає керування, коли все `healthy`. Далі:
+
+    curl http://localhost:3000/health
+    npm run demo:contour
+
+Зупинка зі збереженням даних: `docker compose --profile app down`; повне стирання разом із томами: `docker compose --profile app down -v`. Дані Postgres, RabbitMQ і `redis-queue` лежать у томах і переживають перезапуск; сховище файлів (MinIO) працює в `tmpfs` і перезапуск не переживає. Профіль `app` потрібен, щоб звичайний `docker compose up -d --wait` лишався інфраструктурним: на ньому тримаються демо ДЗ №19–22, яким не можна мати живого consumer на черзі.
+
+**Варіант для розробки: процеси на хості.** Файли `secrets/*.example` це dev-шаблони, значення в них навмисно не є секретами (домовленість курсу).
 
     npm ci
     cp .env.example .env
@@ -180,7 +192,7 @@ flowchart TB
 
 API слухає `http://localhost:3000`: Swagger на `/docs`, health на `/health`. Без Docker-секретів, у режимі грейдера (`SKIP_VAULT=1`, змінні експортовані вручну), той самий порядок описано в розділі «Grading».
 
-**Перевірити контур однією командою.** `npm run demo:contour` проходить усі кроки нижче сам і друкує `ключ=значення` (докладно та з виводом: розділ «Grading», абзац «Наскрізний контур»). Перед запуском зупиніть `npm run consumer`, інакше демо відмовиться стартувати.
+**Перевірити контур однією командою.** `npm run demo:contour` проходить усі кроки нижче сам і друкує `ключ=значення` (докладно та з виводом: розділ «Grading», абзац «Наскрізний контур»). Демо працює й тоді, коли consumer уже запущено (контейнер `consumer` або `npm run consumer`): воно користується ним.
 
     npm run build
     npm run demo:contour
@@ -229,6 +241,8 @@ API слухає `http://localhost:3000`: Swagger на `/docs`, health на `/he
 | `POST /orders` дає `201`, але статус лишається `created` | не запущено `relay` або `consumer` (або не виконано `rabbit:setup`) | запустити `npm run rabbit:setup`, `npm run relay`, `npm run consumer` |
 | Клієнт AMQP пише про помилку протоколу | вказано порт `15672` (панель керування), а не `5672` | використовувати `5672` |
 | `eval "$(node -e …)"` у Git Bash друкує `stdout is not a tty` | `node` є аліасом на `winpty` | писати `command node -e …` |
+| `docker compose --profile app up` скаржиться на `DB_USER` або `secrets/db_password` | не створено `.env` або файли-секрети (Docker замість файлу створив директорію) | видалити директорію `secrets/db_password`, виконати `npm run bootstrap` |
+| `demo:publish`, `demo:dlq`, `demo:duplicate`, `demo:outbox` кажуть, що на черзі вже є consumer | працює контейнер `consumer` із профілю `app` | `docker compose --profile app stop relay consumer` |
 | Тести `integration` і `e2e` не стартують | Docker не запущено | запустити Docker Desktop |
 
 ### Блок → шлях → чим замінено і чому
@@ -261,7 +275,7 @@ API слухає `http://localhost:3000`: Swagger на `/docs`, health на `/he
 | **11.5** Подія не губиться і не дублює ефект | так | курс (ДЗ 15, 14) | outbox + relay на `FOR UPDATE SKIP LOCKED`, confirm-канал, ручний `ack` після ефекту, inbox у Postgres (переживає рестарт) | «Outbox та ідемпотентність», «Async-події через RabbitMQ» | `demo:crash-write`, `demo:crash-relay`, `demo:duplicate`, `demo:publish` |
 | **11.5** Конкурентна обробка без дублів, DLQ | так | курс (ДЗ 10, 14, 16) | воркер-пул на `SKIP LOCKED`; retry лише на `40001`/`40P01`; отруєне повідомлення в DLQ з причиною | «Конкурентність», «Async-події через RabbitMQ» | `npm run demo:workers`, `npm run demo:dlq` |
 | **11.5** Realtime лише власнику, `Last-Event-ID` | так | курс (ДЗ 13) | socket.io-кімнати й SSE. Межа: зміна `created → pending` від consumer-а в realtime не пушиться (див. «Життєвий цикл замовлення») | «Realtime» | `node scripts/realtime-demo.mjs`: `A_RECEIVED=1 B_RECEIVED=0` |
-| **11.6** Локальний запуск однією командою | частково | курс (ДЗ 2) | `docker compose up -d --wait` піднімає інфраструктуру (Postgres, PgBouncer, RabbitMQ, два Redis, S3, спостережуваність); сам застосунок, `relay` і `consumer` запускаються окремими командами за runbook | «Runbook», «Grading» | `docker compose up -d --wait` на чистому клоні, далі runbook |
+| **11.6** Локальний запуск однією командою | так | курс (ДЗ 2) | `npm run bootstrap` (створює `.env`, секрети з шаблонів і ключі JWT, нічого не перезаписує) і `docker compose --profile app up -d --wait`: інфраструктура, потім `api` (сам виконує міграції, seed і топологію RabbitMQ), `relay` і `consumer` чекають на його healthcheck. Профіль `app` потрібен, щоб звичайний `up` лишався інфраструктурним (на ньому тримаються демо ДЗ 19–22). Дані Postgres, RabbitMQ і `redis-queue` переживають перезапуск (томи); файли в MinIO ні (`tmpfs`) | «Runbook», «Grading» | `npm run bootstrap && docker compose --profile app up -d --wait` на чистому клоні, далі `curl /health` і `npm run demo:contour` |
 | **11.6** Production-образ | так | курс (ДЗ 19) | три стадії, distroless, uid 65532, секрет збірки через `--mount=type=secret`, сканер із порогом. Образ у кластері це HTTP-оболонка `dist/k8s/server.js` (probes, rollout, SIGTERM), а не повний Nest-застосунок | «Docker», «Kubernetes» | `npm run demo:image`, `npm run scan` |
 | **11.6** Розгортання кодом, оновлення без втрат | так | курс (ДЗ 19) | Pulumi → kind, `maxUnavailable: 0`, PDB, HPA | «Kubernetes» | `npm run demo:rollout` → `failed=0`; `npm run demo:pdb` |
 | **11.6** Розгортання поза локальною машиною | так | курс (ДЗ 21, 22) | публічного URL немає; докази: прогін конвеєра ДЗ 22 (деплой у kind у раннері, `deployed-digest = built-digest`) і стек AWS із доведеним teardown (ДЗ 21, шість перевірок порожнечі) | «CI/CD», «AWS» | посилання на прогін у GitHub Actions; артефакт `pipeline-evidence` |
@@ -299,6 +313,7 @@ API слухає `http://localhost:3000`: Swagger на `/docs`, health на `/he
 | 11.5 Воркери | `npm run demo:workers`; `npm run demo:retry` | 12 задач розподілено між 4 воркерами порівну, дублів немає; після `40001` повтор транзакції |
 | 11.5 Realtime | `node scripts/realtime-demo.mjs` | `A_RECEIVED=1`, `B_RECEIVED=0`; з `--same-room` `B_RECEIVED=1` |
 | 11.6 Інфраструктура | `docker compose up -d --wait` | усі сервіси `healthy` |
+| 11.6 Запуск однією командою | `npm run bootstrap`, `docker compose --profile app up -d --wait`, далі `curl http://localhost:3000/health` і `npm run demo:contour` | усі сервіси `healthy` або `running`; `/health` дає `200`; `external-consumer=1 background-pending=1` |
 | 11.6 Образ | `npm run demo:image`; `npm run scan` | `stages=3 shell-inside=0 runtime-uid=65532`; `gate=pass`, а `SCAN_MAX=-1 npm run scan` дає `gate=fail` і код ≠ 0 |
 | 11.6 Розгортання | `npm run demo:rollout`; `npm run demo:pdb` | `failed=0` при `requests>=5000`; `evict-1=201 evict-2=429` |
 | 11.7 Health | `curl http://localhost:3000/health` | `200` зі станом БД і `uptime`; у вході для кластера `/healthz` і `/readyz` |
@@ -878,7 +893,7 @@ Provider verification (`test/contract/verify-provider.ts`) піднімає сп
 
 **CI/CD (ДЗ №32).** Блок команд ДЗ №32 (`demo:gates`, `demo:oidc`, `demo:cost`, `gate:cost`, перевірка пинів) не потребує ні кластера, ні хмари, ні токена GitHub: `demo:gates` один раз завантажує `oasdiff` (закріплений sha256) і працює з `SKIP_VAULT=1` разом з рештою, бо не читає сховище. `demo:oidc` сам генерує пару RSA й локального «видавця» і не ходить у мережу. Другий `gate:cost` має завершитися кодом `1` і `gate=fail` (перший друкує `gate=pass`). `pin-actions.sh check` потребує лише `git` і доступу до github.com. Повний конвеєр (збірка, OIDC, kind, `pulumi up`, `demo:rollout`) живе в GitHub Actions: грейдер бере перший успішний прогін на head PR і завантажує з нього артефакт `pipeline-evidence` (див. розділ «CI/CD (ДЗ №32)»). Pipeline-секрети: єдиний `GITHUB_TOKEN`; значення зі сховища застосунку CI генерує сам (`scripts/ci-vault.sh`), тож у GitHub Secrets нічого не потрібно додавати.
 
-**Наскрізний контур (курсовий).** `npm run demo:contour` піднімає справжній застосунок (`node dist/main.js`) окремим процесом на порту `22921` (змінна `CONTOUR_PORT` його змінює), а relay і consumer запускає в собі: ті самі `relayLoop` і `startOrderPlacedConsumer`, що й `npm run relay` та `npm run consumer`. Сценарій: валідація й доступ, створення, повтор із тим самим `Idempotency-Key`, фонова обробка (`created → pending`), читання окремим запитом, життєвий цикл до `delivered`, метрики й логи. Потрібні `docker compose up -d --wait`, `npm run build`, `npm run migrate` і експортовані `RABBITMQ_URL`, `REDIS_QUEUE_URL` (як у блоці вище); `npm run consumer` має бути зупинений (демо перевіряє це й завершується з поясненням). Свої дані демо створює й видаляє саме, чужі не чіпає. Вивід (`background-ms` і `trace-id` щоразу інші):
+**Наскрізний контур (курсовий).** `npm run demo:contour` піднімає справжній застосунок (`node dist/main.js`) окремим процесом на порту `22921` (змінна `CONTOUR_PORT` його змінює), а relay і consumer запускає в собі: ті самі `relayLoop` і `startOrderPlacedConsumer`, що й `npm run relay` та `npm run consumer`. Сценарій: валідація й доступ, створення, повтор із тим самим `Idempotency-Key`, фонова обробка (`created → pending`), читання окремим запитом, життєвий цикл до `delivered`, метрики й логи. Потрібні `docker compose up -d --wait`, `npm run build`, `npm run migrate` і експортовані `RABBITMQ_URL`, `REDIS_QUEUE_URL` (як у блоці вище); Якщо на черзі вже є consumer (контейнер із профілю `app` або `npm run consumer`), демо користується ним (`external-consumer=1`), інакше запускає свій (`external-consumer=0`). Свої дані демо створює й видаляє саме, чужі не чіпає. Вивід (`background-ms` і `trace-id` щоразу інші):
 
     health=200
     no-token=401
@@ -892,6 +907,7 @@ Provider verification (`test/contract/verify-provider.ts`) піднімає сп
     key-reuse=422
     orders=1
     outbox=1
+    external-consumer=0
     background-pending=1
     background-ms=241
     foreign=404
@@ -915,6 +931,8 @@ Provider verification (`test/contract/verify-provider.ts`) піднімає сп
     secret-in-logs=0
     trace-id=abdf0c74bfee41b43a09d77d3a6e094a
     OK: усі інваріанти виконано
+
+Профіль `app` грейдер не вмикає: демо ДЗ №19–22 (`demo:publish`, `demo:dlq`, `demo:duplicate`, `demo:outbox`) вимагають, щоб на черзі не було consumer, тому після `docker compose --profile app up` виконайте перед ними `docker compose --profile app stop relay consumer`.
 
 Звено «розгортання» (ланка 10 ТЗ) демо не перевіряє: його доводять прогін конвеєра і teardown (розділи «CI/CD» і «AWS»). `POST /orders` має rate-limit (див. «Redis»), тому багаторазовий запуск демо за кілька секунд поспіль може впертися в `429`.
 
@@ -2467,3 +2485,6 @@ GitHub маскує в лозі `***` лише **точні** значення �
 | `scripts/ci-promote.mjs`, `scripts/lib/promote.mjs`, `scripts/demo-promote.mjs`, `fixtures/promote/` | Просування digest із PR після злиття (пошук PR і прогону, перевірка evidence), `npm run demo:promote` |
 | `scripts/gate-contract.mjs`, `scripts/lib/oasdiff.mjs`, `.dependency-cruiser.cjs`, `eslint.config.mjs`, `scripts/demo-gates.mjs`, `fixtures/gates/` | Гейти якості й `npm run demo:gates` |
 | `scripts/ci-vault.sh`, `scripts/ci-evidence.mjs`, `scripts/pin-actions.sh`, `scripts/setup-environments.sh` | Випадкове сховище для CI, збирання evidence, перевірка пинів, створення environments |
+| `docker/Dockerfile.app` | Образ для `docker compose --profile app` (API, relay, consumer): повний Nest-застосунок з dev-залежностями, без секретів; не production-образ |
+| `scripts/bootstrap.mjs` | `npm run bootstrap`: створює `.env`, файли-секрети з шаблонів і dev-ключі JWT, нічого не перезаписує |
+| `src/demo-contour.ts` | `npm run demo:contour`: наскрізний контур замовлення проти справжнього застосунку (дочірній процес) з relay і consumer |

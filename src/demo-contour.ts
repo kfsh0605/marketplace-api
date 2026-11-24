@@ -195,13 +195,10 @@ void runStandalone(async (failures) => {
     const out: Record<string, string | number> = {};
 
     try {
+        // Якщо на черзі вже є consumer (наприклад, контейнер із профілю app), користуємось ним,
+        // інакше запускаємо свій. Relay запускаємо завжди: він бере лише рядки outbox цього демо.
         const queue = await demo.ch.checkQueue(QUEUE_ORDER_PLACED);
-        if (queue.consumerCount > 0) {
-            throw new Error(
-                `на черзі ${QUEUE_ORDER_PLACED} уже висить consumer (${queue.consumerCount}): ` +
-                'зупини "npm run consumer" (Ctrl+C) і запусти демо знову',
-            );
-        }
+        const externalConsumer = queue.consumerCount > 0;
 
         await createDemoUser(dataSource, customerEmail, 'customer');
         await createDemoUser(dataSource, strangerEmail, 'customer');
@@ -269,8 +266,11 @@ void runStandalone(async (failures) => {
 
         // Ланка 6: фонова обробка. Relay і consumer ті самі, що в `npm run relay` і `npm run consumer`.
         relayDone = relayLoop(demo.pool, publisher, { signal: stopRelay.signal, notBefore: startedAt, pollMs: 200 });
-        const started = await startOrderPlacedConsumer(demo.ch, demo.store, {});
-        consumerTag = started.consumerTag;
+        if (!externalConsumer) {
+            const started = await startOrderPlacedConsumer(demo.ch, demo.store, {});
+            consumerTag = started.consumerTag;
+        }
+        out['external-consumer'] = externalConsumer ? 1 : 0;
 
         // Ланка 7: результат читається окремим запитом
         const waitStart = Date.now();

@@ -1,3 +1,27 @@
+# Спільне для API, relay і consumer: один образ, секрети монтуються з хоста (в образі їх немає).
+# Профіль `app`: звичайний `docker compose up -d --wait` піднімає лише інфраструктуру, як і раніше,
+# а `docker compose --profile app up -d --wait` додає ще й застосунок.
+x-app: &app
+  build:
+    context: .
+    dockerfile: docker/Dockerfile.app
+  image: marketplace-api:compose
+  restart: unless-stopped
+  profiles: ["app"]
+  volumes:
+    - ./secrets:/app/secrets:ro
+  environment:
+    NODE_ENV: development
+    DB_HOST: pgbouncer
+    DB_PORT: "6432"
+    DB_USER: ${DB_USER}
+    DB_NAME: ${DB_NAME}
+    RABBITMQ_HOST: rabbitmq
+    REDIS_URL: redis://redis-cache:6379
+    REDIS_QUEUE_URL: redis://redis-queue:6379
+    STORAGE_ENDPOINT: http://s3:9000
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -193,6 +217,53 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+
+  api:
+    <<: *app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+      redis-queue:
+        condition: service_healthy
+      s3:
+        condition: service_started
+    ports:
+      - "3000:3000"
+    # міграції, ідемпотентний seed і топологія RabbitMQ виконуються перед стартом API:
+    # relay і consumer чекають на healthcheck цього сервісу, тож схема й exchange уже готові
+    command:
+      - bash
+      - scripts/with-secrets.sh
+      - dev
+      - sh
+      - -c
+      - node_modules/.bin/typeorm migration:run -d dist/data-source.js && node dist/seed.js && node dist/messaging/setup.js && exec node dist/main.js
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 60s
+
+  relay:
+    <<: *app
+    depends_on:
+      api:
+        condition: service_healthy
+    command: ["bash", "scripts/with-secrets.sh", "dev", "node", "dist/outbox/run-relay.js"]
+
+  consumer:
+    <<: *app
+    depends_on:
+      api:
+        condition: service_healthy
+    command: ["bash", "scripts/with-secrets.sh", "dev", "node", "dist/messaging/run-consumer.js"]
 
 volumes:
   pgdata:
