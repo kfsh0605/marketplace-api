@@ -157,6 +157,28 @@ describe('Orders E2E: владіння замовленням (404 на чужи
         expect(ok.body.status).toBe('paid');
     });
 
+    it('PATCH /orders/:id/status: недозволений перехід -> 409 problem+json, допустимий ланцюжок -> 200', async () => {
+        const orderId = await placeOrder(ownerToken, 'status-2');
+        const patch = (status: string) =>
+            http().patch(`/orders/${orderId}/status`).set(bearer(sellerToken)).send({ status });
+
+        const skipped = await patch('shipped').expect(409);
+        expect(skipped.headers['content-type']).toContain('application/problem+json');
+        expect(skipped.body).toMatchObject({ status: 409, title: 'Conflict' });
+
+        for (const next of ['paid', 'packed', 'shipped', 'delivered']) {
+            await patch(next).expect(200);
+        }
+        await patch('cancelled').expect(409);
+
+        const final = await http().get(`/orders/${orderId}`).set(bearer(ownerToken)).expect(200);
+        expect(final.body.status).toBe('delivered');
+    });
+
+    it('PATCH /orders/:id/status: неіснуюче замовлення -> 404, а не 409', async () => {
+        await http().patch('/orders/999999/status').set(bearer(sellerToken)).send({ status: 'paid' }).expect(404);
+    });
+
     it('SSE /orders/:id/events: чужий -> 404 до відкриття потоку, без токена -> 401', async () => {
         const orderId = await placeOrder(ownerToken, 'sse-1');
 

@@ -55,6 +55,13 @@ export async function applyOrderPlacedEffect(store: EffectStore, event: OrderPla
              ON CONFLICT ("eventId") DO NOTHING`,
             [event.eventId, event.data.orderId],
         );
+
+        // Фоновая часть меняет состояние: created -> pending. Условие status = 'created' делает шаг
+        // идемпотентным и безопасным: заказ, который уже ушёл дальше (paid, packed, ...), и заказ из
+        // checkout() (сразу paid) не трогаем. Всё в той же транзакции, что и отметка в inbox.
+        await tx.query(`UPDATE orders SET status = 'pending' WHERE id = $1 AND status = 'created'`, [
+            event.data.orderId,
+        ]);
         return true;
     });
 }

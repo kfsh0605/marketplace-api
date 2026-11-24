@@ -1,5 +1,6 @@
 import {
     BadRequestException,
+    ConflictException,
     Injectable,
     NotFoundException,
     Optional,
@@ -18,6 +19,7 @@ import { decodeCursor, encodeCursor, PaginatedResult } from '../common/paginatio
 import { CreateOrderDto } from './dto/create-order.dto';
 import { Order } from './order';
 import { OrderEventsService } from './order-events.service';
+import { OrderStatus, statusesBefore } from './order-status';
 
 @Injectable()
 export class OrdersService {
@@ -219,21 +221,39 @@ export class OrdersService {
         await Promise.all([...productIds].map((id) => this.productCards.invalidate(id)));
     }
 
-    async updateStatus(orderId: string, status: string): Promise<Order> {
+    /**
+     * Зміна статусу за правилами життєвого циклу (order-status.ts).
+     * Перевірка й зміна одним оператором: UPDATE ... WHERE status IN (дозволені попередні статуси).
+     * Між «прочитали статус» і «записали» немає вікна, тож фоновий consumer (created -> pending)
+     * і продавець (created -> paid) не можуть затерти один одного.
+     * Нуль змінених рядків: або замовлення немає (404), або перехід недозволений (409).
+     */
+    async updateStatus(orderId: string, status: OrderStatus): Promise<Order> {
         const id = Number(orderId);
         if (Number.isNaN(id)) {
             throw new NotFoundException(`Order ${orderId} not found`);
         }
 
-        const result = await this.orderRepo
-            .createQueryBuilder()
-            .update(OrderEntity)
-            .set({ status })
-            .where('id = :id', { id })
-            .execute();
+        const allowedFrom = statusesBefore(status);
+        let affected = 0;
+        if (allowedFrom.length > 0) {
+            const result = await this.orderRepo
+                .createQueryBuilder()
+                .update(OrderEntity)
+                .set({ status })
+                .where('id = :id AND status IN (:...allowedFrom)', { id, allowedFrom })
+                .execute();
+            affected = result.affected ?? 0;
+        }
 
-        if (result.affected === 0) {
-            throw new NotFoundException(`Order ${orderId} not found`);
+        if (affected === 0) {
+            const current = await this.orderRepo.findOne({ where: { id }, select: { id: true, status: true } });
+            if (!current) {
+                throw new NotFoundException(`Order ${orderId} not found`);
+            }
+            throw new ConflictException(
+                `Cannot change status of order ${orderId} from '${current.status}' to '${status}'`,
+            );
         }
 
         // Emit йде звідси, з бізнес-логіки зміни статусу, а не з контролера напряму —
