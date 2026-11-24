@@ -1,0 +1,73 @@
+{
+  "steps": [
+    {
+      "op": "create",
+      "urn": "urn:pulumi:dev::marketplace-infra::pulumi:pulumi:Stack::marketplace-infra-dev",
+      "newState": {
+        "type": "pulumi:pulumi:Stack",
+        "inputs": {}
+      }
+    },
+    {
+      "op": "create",
+      "urn": "urn:pulumi:dev::marketplace-infra::kubernetes:core/v1:Namespace::ns",
+      "newState": {
+        "type": "kubernetes:core/v1:Namespace",
+        "inputs": {
+          "metadata": {
+            "name": "marketplace"
+          }
+        }
+      }
+    },
+    {
+      "op": "create",
+      "urn": "urn:pulumi:dev::marketplace-infra::kubernetes:apps/v1:Deployment::deployment",
+      "newState": {
+        "type": "kubernetes:apps/v1:Deployment",
+        "inputs": {
+          "metadata": {
+            "name": "marketplace-api"
+          },
+          "spec": {
+            "replicas": 30,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "api",
+                    "resources": {
+                      "requests": {
+                        "cpu": "1",
+                        "memory": "2Gi"
+                      },
+                      "limits": {
+                        "memory": "192Mi"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "op": "create",
+      "urn": "urn:pulumi:dev::marketplace-infra::kubernetes:autoscaling/v2:HorizontalPodAutoscaler::hpa",
+      "newState": {
+        "type": "kubernetes:autoscaling/v2:HorizontalPodAutoscaler",
+        "inputs": {
+          "spec": {
+            "minReplicas": 2,
+            "maxReplicas": 4
+          }
+        }
+      }
+    }
+  ],
+  "changeSummary": {
+    "create": 4
+  }
+}

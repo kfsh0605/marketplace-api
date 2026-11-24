@@ -1,0 +1,302 @@
+name: pipeline
+
+# Конвеєр pull request: перевірки якості -> збірка (один раз) -> гейт образу -> гейт OIDC -> деплой у kind
+# за digest -> rollout без втрат -> артефакт pipeline-evidence. Кожен гейт уміє сказати «ні» і зупинити наступні джоби.
+on:
+  pull_request:
+    branches: [main]
+
+# Мінімум прав на рівні файлу. Підвищення (id-token, packages) стоїть лише на тих джобах, яким воно потрібне.
+permissions:
+  contents: read
+
+concurrency:
+  group: pipeline-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  workflows:
+    name: workflows (actionlint, pins)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          curl -fsSL -o actionlint.tgz "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  actionlint.tgz" | sha256sum -c -
+          tar -xzf actionlint.tgz actionlint
+          ./actionlint -color
+
+      - name: Action pins (SHA matches the tag in the comment)
+        run: bash scripts/pin-actions.sh check
+
+  gates:
+    name: gates (types, contract, architecture)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Gate types (tsc)
+        run: npm run typecheck
+
+      - name: Gate style (eslint)
+        run: npm run lint
+
+      - name: Gate contract (oasdiff vs main)
+        env:
+          BASE_REF: origin/main
+        run: npm run gate:contract
+
+      - name: Gate architecture (dependency-cruiser)
+        run: npm run gate:arch
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Proof that the gates fail on bad input (demo:gates)
+        run: npm run demo:gates
+
+      - name: Proof of the OIDC, cost and promote gates on local fixtures
+        run: |
+          npm run demo:oidc
+          npm run demo:cost
+          npm run demo:promote
+
+  tests:
+    name: tests (integration, e2e)
+    runs-on: ubuntu-latest
+    env:
+      DB_HOST: localhost
+      DB_USER: test_user
+      DB_NAME: test_db
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Integration tests
+        run: npm run test:integration
+
+      - name: E2E tests
+        run: npm run test:e2e
+
+  contract:
+    name: contract (pact broker)
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Placeholder secret file for compose parsing
+        run: |
+          mkdir -p secrets
+          echo "unused-in-ci" > secrets/db_password
+
+      - name: Start Pact Broker
+        run: docker compose up -d --wait pact-broker-db pact-broker
+
+      - name: Generate consumer contract
+        run: npm run test:contract
+
+      - name: Publish contract to Pact Broker
+        env:
+          PACT_VERSION: ${{ github.sha }}
+        run: |
+          curl -sS -f -X PUT \
+            -H "Content-Type: application/json" \
+            --data-binary "@pacts/MarketplaceWebClient-MarketplaceApi.json" \
+            "http://127.0.0.1:9292/pacts/provider/MarketplaceApi/consumer/MarketplaceWebClient/version/${PACT_VERSION}"
+
+      - name: Verify provider against broker
+        env:
+          DB_HOST: localhost
+          DB_USER: test_user
+          DB_NAME: test_db
+          PACT_BROKER_URL: http://127.0.0.1:9292
+          PACT_PROVIDER_VERSION: ${{ github.sha }}
+        run: npm run verify:provider
+
+      - name: Tag verified provider version as prod
+        env:
+          PACT_VERSION: ${{ github.sha }}
+        run: |
+          curl -sS -f -X PUT \
+            -H "Content-Type: application/json" \
+            "http://127.0.0.1:9292/pacticipants/MarketplaceApi/versions/${PACT_VERSION}/tags/prod"
+
+      - name: can-i-deploy gate
+        env:
+          PACT_VERSION: ${{ github.sha }}
+        run: |
+          response=$(curl -sS "http://127.0.0.1:9292/can-i-deploy?pacticipant=MarketplaceWebClient&version=${PACT_VERSION}&to=prod")
+          echo "$response"
+          deployable=$(echo "$response" | jq -r '.summary.deployable')
+          if [ "$deployable" != "true" ]; then
+            echo "can-i-deploy: deployable=$deployable - блокуємо деплой"
+            exit 1
+          fi
+
+  build:
+    name: build (once)
+    needs: [workflows, gates]
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build.yml
+
+  scan:
+    name: gate image (trivy)
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull the built image by digest
+        env:
+          IMAGE_REF: ${{ needs.build.outputs.ref }}
+        run: docker pull "$IMAGE_REF"
+
+      - name: Scan with a threshold (npm run scan)
+        env:
+          SCAN_IMAGE: ${{ needs.build.outputs.ref }}
+          SCAN_MAX: '7'
+        run: |
+          mkdir -p ci-out
+          set +e
+          npm run --silent scan 2>&1 | tee ci-out/scan.log
+          code=${PIPESTATUS[0]}
+          # digest, який саме просканували: за ним deploy.yml потім упевнюється, що викочують ті самі байти
+          printf 'gate-scan-exit=%s\nscanned-digest=%s\n' "$code" "${SCAN_IMAGE##*@}" > ci-out/scan.env
+          exit "$code"
+
+      - name: Upload scan evidence part
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: part-scan
+          path: ci-out/
+          if-no-files-found: ignore
+
+  oidc:
+    name: gate OIDC (signature + policy)
+    runs-on: ubuntu-latest
+    environment: staging
+    # id-token: write лише на цій джобі: тільки вона має право просити в GitHub підписаний токен.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Ask GitHub for an ID token, verify the signature by jwks_uri, apply oidc/policy.json
+        run: |
+          mkdir -p ci-out
+          node scripts/oidc-gate.mjs --evidence-out ci-out/oidc.env
+
+      - name: Upload OIDC evidence part
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: part-oidc
+          path: ci-out/
+          if-no-files-found: ignore
+
+  deploy:
+    name: deploy to kind (preview, cost gate, up, rollout)
+    needs: [build, scan, oidc]
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Deploy by digest
+        uses: ./.github/actions/deploy-kind
+        with:
+          image: ${{ needs.build.outputs.ref }}
+          base-ref: ${{ github.base_ref }}
+          cost-bypass: ${{ contains(github.event.pull_request.labels.*.name, 'cost-approved') }}
+
+      - name: Upload deploy evidence part
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: part-deploy
+          path: ci-out/
+          if-no-files-found: ignore
+
+  evidence:
+    name: evidence (pipeline-evidence)
+    if: ${{ always() }}
+    needs: [workflows, gates, tests, contract, build, scan, oidc, deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download evidence parts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: part-*
+          path: parts
+          merge-multiple: true
+
+      - name: Assemble evidence.txt
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/ci-evidence.mjs assemble --parts parts --out pipeline-evidence
+
+      - name: Upload pipeline-evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pipeline-evidence
+          path: pipeline-evidence/
+          if-no-files-found: error

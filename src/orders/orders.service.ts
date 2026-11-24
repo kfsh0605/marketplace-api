@@ -18,9 +18,6 @@ import { decodeCursor, encodeCursor, PaginatedResult } from '../common/paginatio
 import { CreateOrderDto } from './dto/create-order.dto';
 import { Order } from './order';
 import { OrderEventsService } from './order-events.service';
-import { CurrentUser } from '../auth/current-user.decorator';
-import { Roles } from '../auth/roles.decorator';
-import type { AccessPrincipal } from '../auth/token.service';
 
 @Injectable()
 export class OrdersService {

@@ -1,0 +1,9 @@
+{
+  "description": "Політика допуску до деплою: GitHub Actions OIDC-токен приймається, лише якщо підпис перевірено за jwks_uri, iss/aud збігаються, а sub входить до списку. Репозиторій створено після 15.07.2026, тому sub у незмінному форматі repo:<owner>@<owner-id>/<repo>@<repo-id>:environment:<name> (ID не змінюються при перейменуванні/передачі).",
+  "issuer": "https://token.actions.githubusercontent.com",
+  "audience": "marketplace-api-deploy",
+  "subjects": [
+    "repo:kfsh0605@228515503/marketplace-api@1341564157:environment:staging",
+    "repo:kfsh0605@228515503/marketplace-api@1341564157:environment:prod"
+  ]
+}

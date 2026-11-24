@@ -1,0 +1,18 @@
+{
+  "SchemaVersion": 2,
+  "ArtifactName": "marketplace-api:fixture",
+  "Results": [
+    {
+      "Target": "marketplace-api:fixture (debian 12.13)",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2099-0001",
+          "PkgName": "libssl3",
+          "InstalledVersion": "3.0.15-1~deb12u1",
+          "FixedVersion": "3.0.16-1~deb12u1",
+          "Severity": "HIGH"
+        }
+      ]
+    }
+  ]
+}
