@@ -167,7 +167,7 @@ flowchart TB
     curl http://localhost:3000/health
     npm run demo:contour
 
-Зупинка зі збереженням даних: `docker compose --profile app down`; повне стирання разом із томами: `docker compose --profile app down -v`. Дані Postgres, RabbitMQ і `redis-queue` лежать у томах і переживають перезапуск; сховище файлів (MinIO) працює в `tmpfs` і перезапуск не переживає. Профіль `app` потрібен, щоб звичайний `docker compose up -d --wait` лишався інфраструктурним: на ньому тримаються демо ДЗ №19–22, яким не можна мати живого consumer на черзі. Під час першого `up` Compose може вивести рядки `pull access denied for marketplace-api`: він спершу пробує завантажити образ `marketplace-api:compose` із реєстру, не знаходить його й збирає локально з `docker/Dockerfile.app`. Це не помилка, `up` завершується кодом 0. Дані пережили `docker compose --profile app down` і повторний `up -d --wait`: `SELECT count(*) FROM users` дає `6` до і після, `/health` знову повертає `200` із `"database":"up"`.
+Зупинка зі збереженням даних: `docker compose --profile app down`; повне стирання разом із томами: `docker compose --profile app down -v`. Дані Postgres, RabbitMQ і `redis-queue` лежать у томах і переживають перезапуск; сховище файлів (MinIO) працює в `tmpfs` і перезапуск не переживає. Профіль `app` потрібен, щоб звичайний `docker compose up -d --wait` лишався інфраструктурним: на ньому тримаються демо ДЗ №19–22, яким не можна мати живого consumer на черзі. Образ `marketplace-api:compose` збирається локально з `docker/Dockerfile.app` при кожному `up` (`pull_policy: build`, кеш шарів робить повтор швидким). Якщо Compose все ж виведе рядки `pull access denied for marketplace-api`, це не помилка: він спершу пробував завантажити образ із реєстру, і `up` завершується кодом 0. Дані пережили `docker compose --profile app down` і повторний `up -d --wait`: `SELECT count(*) FROM users` дає `6` до і після, `/health` знову повертає `200` із `"database":"up"`.
 
 **Варіант для розробки: процеси на хості.** Файли `secrets/*.example` це dev-шаблони, значення в них навмисно не є секретами (домовленість курсу).
 
@@ -245,7 +245,7 @@ API слухає `http://localhost:3000`: Swagger на `/docs`, health на `/he
 | `demo:publish`, `demo:dlq`, `demo:duplicate`, `demo:outbox` кажуть, що на черзі вже є consumer | працює контейнер `consumer` із профілю `app` | `docker compose --profile app stop relay consumer` |
 | Тести `integration` і `e2e` не стартують | Docker не запущено | запустити Docker Desktop |
 | `POST /webhooks/payments` дає `503` | не задано `PAYMENT_WEBHOOK_SECRET`: немає файлу `secrets/payment_webhook_secret` | `npm run bootstrap` (або `cp secrets/payment_webhook_secret.example secrets/payment_webhook_secret`) і перезапуск |
-| У контейнері `api` старий код (немає `/webhooks/payments`, немає таблиці `payment_events`) | образ зібрано до оновлення коду | `docker compose --profile app up -d --wait --build` |
+| У контейнері `api` старий код (немає `/webhooks/payments`, немає таблиці `payment_events`) | Compose використав наявний образ `marketplace-api:compose`, зібраний зі старого коду (тег спільний для всіх клонів на машині) | у `docker-compose.yml` стоїть `pull_policy: build`, тож `up` збирає образ щоразу; на старішій копії: `docker compose --profile app up -d --wait --build` |
 
 ### Блок → шлях → чим замінено і чому
 
@@ -2409,7 +2409,7 @@ GitHub маскує в лозі `***` лише **точні** значення �
 - На ендпоінті немає rate-limit: від зловмисника без секрету захищає підпис (дешева відмова `401`), але не від перевантаження.
 - Обробляється лише `payment.succeeded`; повернень і часткових оплат немає.
 - Подія для SSE живе в пам'яті процесу: якщо процес впаде між комітом і сповіщенням, статус у БД правильний (читається звичайним `GET /orders/:id`), а push власник не отримає.
-- Контейнер `api` збирається з `docker/Dockerfile.app`: після оновлення коду потрібен `docker compose --profile app up -d --wait --build`.
+- Контейнер `api` збирається з `docker/Dockerfile.app` при кожному `docker compose --profile app up` (`pull_policy: build`), тож оновлений код і міграції підхоплюються без окремого `--build`.
 
 ### Як перевірити
 
