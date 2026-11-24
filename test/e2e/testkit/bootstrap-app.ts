@@ -21,6 +21,9 @@ import { OutboxAndProcessedMessages1791300000000 } from '../../../src/migrations
 import { IdempotencyKeys1791400000000 } from '../../../src/migrations/1791400000000-IdempotencyKeys';
 import { AuthTables1793000000000 } from '../../../src/migrations/1793000000000-AuthTables';
 import { FilesTable1794000000000 } from '../../../src/migrations/1794000000000-FilesTable';
+import { PaymentEvents1795000000000 } from '../../../src/migrations/1795000000000-PaymentEvents';
+
+export const E2E_WEBHOOK_SECRET = 'e2e-webhook-secret-0123456789';
 
 function setAuthEnv(): void {
     const { privateKey, publicKey } = generateKeyPairSync('ec', {
@@ -70,7 +73,8 @@ export async function bootstrapE2eApp(): Promise<E2eApp> {
             OutboxAndProcessedMessages1791300000000,
             IdempotencyKeys1791400000000,
             AuthTables1793000000000,
-            FilesTable1794000000000
+            FilesTable1794000000000,
+            PaymentEvents1795000000000,
         ],
         synchronize: false,
     });
@@ -86,6 +90,7 @@ export async function bootstrapE2eApp(): Promise<E2eApp> {
     process.env.REDIS_QUEUE_URL = `redis://${redisContainer.getHost()}:${redisContainer.getMappedPort(6379)}`;
     setAuthEnv();
     setStorageEnv();
+    process.env.PAYMENT_WEBHOOK_SECRET = E2E_WEBHOOK_SECRET;
     const { AppModule } = require('../../../src/app.module') as { AppModule: typeof AppModuleType };
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -125,6 +130,7 @@ export async function bootstrapE2eApp(): Promise<E2eApp> {
             delete process.env.STORAGE_BUCKET;
             delete process.env.STORAGE_ACCESS_KEY;
             delete process.env.STORAGE_SECRET_KEY;
+            delete process.env.PAYMENT_WEBHOOK_SECRET;
         },
     };
 }

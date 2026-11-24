@@ -38,9 +38,9 @@ Marketplace API: бекенд маркетплейсу. У ньому є кат�
 | 4 | Фонова обробка поза відповіддю клієнту | так | outbox → relay → RabbitMQ → consumer (ack після ефекту, inbox `processed_messages`), який переводить замовлення `created → pending`; черга BullMQ і воркери `post_processing_jobs` |
 | 5 | Доступ за роллю і за власністю | так | JWT ES256 + refresh з ротацією; роль перевіряє гард, власність замовлення перевіряє сервіс (чуже замовлення дає `404`) |
 | 6 | Push-повідомлення власнику | так | подія `order.status` лише власнику: socket.io-кімнати і SSE з `Last-Event-ID` |
-| 7 | Зовнішня система, що сама стукає в API (вебхук платежів) | **ні** | не реалізовано; див. «Відомі межі системи» нижче |
+| 7 | Зовнішня система, що сама стукає в API (вебхук платежів) | так | `POST /webhooks/payments`: підпис HMAC над сирим тілом, дедуп за id події, звірка суми із замороженою в замовленні; `npm run demo:webhook`; див. «Вебхук платежів» |
 
-Закрито 6 із 7.
+Закрито 7 із 7.
 
 ### Життєвий цикл замовлення
 
@@ -108,7 +108,7 @@ Marketplace API: бекенд маркетплейсу. У ньому є кат�
 
 ### Відомі межі системи
 
-- Вебхука платіжного провайдера немає (рядок 7 перевірки домену): підпис над сирим тілом, дедуп за id події й звірка суми не реалізовані.
+- Вебхук платежів приймає лише `payment.succeeded` від власного адаптера провайдера (реального еквайра немає), з одним секретом і без rate-limit на ендпоінті: межі описано в розділі «Вебхук платежів».
 - Застосунок, `relay` і `consumer` у `docker compose` лежать за профілем `app` (`docker compose --profile app up -d --wait`), а не в стандартному наборі: так звичайний `up` лишається інфраструктурним, на ньому тримаються демо, яким не можна мати живого consumer. Образ цих контейнерів (`docker/Dockerfile.app`) має dev-залежності і не є production-образом.
 - Образ у кластері Kubernetes запускає `dist/k8s/server.js`: це HTTP-оболонка для перевірки розгортання (probes, rollout, graceful shutdown), а не повний Nest-застосунок.
 - Докладніше про межі кожної підсистеми: підрозділи «Відомі прогалини» в розділах Auth, Файли, Kubernetes, Observability, AWS.
@@ -229,7 +229,7 @@ API слухає `http://localhost:3000`: Swagger на `/docs`, health на `/he
     npm run test:integration    # Docker: Postgres 16 і Redis у Testcontainers
     npm run test:e2e
 
-Прогін 24.11.2026: unit 162, integration 59, e2e 43 тести, усі зелені. Повторний `test:integration` поспіль теж має бути зеленим: кожен файл піднімає власний контейнер, а між тестами таблиці очищає `TRUNCATE`.
+Прогін 24.11.2026: unit 175, integration 59, e2e 57 тестів, усі зелені (цифри до вебхука: 162, 59 і 43). Повторний `test:integration` поспіль теж має бути зеленим: кожен файл піднімає власний контейнер, а між тестами таблиці очищає `TRUNCATE`.
 
 **Типові збої.**
 
@@ -244,6 +244,8 @@ API слухає `http://localhost:3000`: Swagger на `/docs`, health на `/he
 | `docker compose --profile app up` скаржиться на `DB_USER` або `secrets/db_password` | не створено `.env` або файли-секрети (Docker замість файлу створив директорію) | видалити директорію `secrets/db_password`, виконати `npm run bootstrap` |
 | `demo:publish`, `demo:dlq`, `demo:duplicate`, `demo:outbox` кажуть, що на черзі вже є consumer | працює контейнер `consumer` із профілю `app` | `docker compose --profile app stop relay consumer` |
 | Тести `integration` і `e2e` не стартують | Docker не запущено | запустити Docker Desktop |
+| `POST /webhooks/payments` дає `503` | не задано `PAYMENT_WEBHOOK_SECRET`: немає файлу `secrets/payment_webhook_secret` | `npm run bootstrap` (або `cp secrets/payment_webhook_secret.example secrets/payment_webhook_secret`) і перезапуск |
+| У контейнері `api` старий код (немає `/webhooks/payments`, немає таблиці `payment_events`) | образ зібрано до оновлення коду | `docker compose --profile app up -d --wait --build` |
 
 ### Блок → шлях → чим замінено і чому
 
@@ -270,7 +272,7 @@ API слухає `http://localhost:3000`: Swagger на `/docs`, health на `/he
 | **11.4** Валідація входу, єдиний формат помилок | так | власний (ДЗ 6) | `class-validator` + глобальний `ValidationPipe` замість валідатора OpenAPI; формат помилок `problem+json` (RFC 9457) | «Обраний варіант» | невалідне тіло `POST /orders` → 400 problem+json; негативний e2e-кейс |
 | **11.4** Секрети поза кодом | так | власний (ДЗ 7) | Сховища секретів (Infisical) немає: секрети лежать у файлах `secrets/` (у `.gitignore`), у процес їх передає `scripts/with-secrets.sh`; у CI їх створює `scripts/ci-vault.sh`. Рішення дешевше й не додає ще одного сервера, ціна: ротація й доступ керуються вручну | «Конфігурація», «Ротація пароля БД», «Auth» | `git check-ignore -v secrets/db_password`; `npm run demo:image` → `token-in-*=0` |
 | **11.4** Захист краю: rate-limit | так | курс (ДЗ 16) | ковзне вікно на спільному Redis, `429` з `Retry-After` | «Redis» | `npm run demo:ratelimit` |
-| **11.4** Захист краю: вебхук (підпис, дедуп, сума) | **ні** | не реалізовано | немає ендпоінта платіжного вебхука; не заявлено як реалізоване | «Відомі межі системи» | не показується |
+| **11.4** Захист краю: вебхук (підпис, дедуп, сума) | так | курс (ДЗ 15) | власний адаптер платіжного провайдера замість справжнього еквайра: HMAC-SHA256 над сирим тілом з міткою часу (допуск 300 с), `timingSafeEqual`, дедуп за `event_id` (`UNIQUE` у `payment_events`), звірка суми із замороженою в `orders.totalCents`; леджер лише додається (тригер). Ціна: один секрет, без rate-limit на ендпоінті | «Вебхук платежів» | `npm run demo:webhook`: `accepted=1 rejected-signature=1 amount-mismatch=1 duplicates=1` |
 | **11.5** Фонова частина змінює стан, результат читається окремо | так | курс (ДЗ 14, 16) | consumer `order.placed` → `created → pending`; черга BullMQ для чеків | «Життєвий цикл замовлення», «Async-події через RabbitMQ», «Redis» | runbook, кроки 3 і 5 |
 | **11.5** Подія не губиться і не дублює ефект | так | курс (ДЗ 15, 14) | outbox + relay на `FOR UPDATE SKIP LOCKED`, confirm-канал, ручний `ack` після ефекту, inbox у Postgres (переживає рестарт) | «Outbox та ідемпотентність», «Async-події через RabbitMQ» | `demo:crash-write`, `demo:crash-relay`, `demo:duplicate`, `demo:publish` |
 | **11.5** Конкурентна обробка без дублів, DLQ | так | курс (ДЗ 10, 14, 16) | воркер-пул на `SKIP LOCKED`; retry лише на `40001`/`40P01`; отруєне повідомлення в DLQ з причиною | «Конкурентність», «Async-події через RabbitMQ» | `npm run demo:workers`, `npm run demo:dlq` |
@@ -305,6 +307,7 @@ API слухає `http://localhost:3000`: Swagger на `/docs`, health на `/he
 | 11.4 Автентифікація | `npm run demo:reuse`; `npm run demo:auth` | `r1-reuse=401 r2-after-reuse=401`; `logout=204 after-logout=401 refresh-after-logout=401` |
 | 11.4 Авторизація | `npm run demo:rbac` | `anon=401 own=200 foreign=404 role-denied=403 role-allowed=201 tampered=401` |
 | 11.4 Валідація | `npm run demo:contour` | `invalid-body=400 problem-json=1` |
+| 11.4 Вебхук | `npm run demo:webhook` | `accepted=1 rejected-signature=1 amount-mismatch=1 duplicates=1`, `status-after-forged=pending`, `ledger-rows=2` |
 | 11.4 Секрети | `git check-ignore -v secrets/db_password`; `npm run demo:image` | правило з `.gitignore`; `token-in-history=0 token-in-config=0 token-in-layers=0` |
 | 11.4 Rate-limit | `npm run demo:ratelimit` | `allowed=5 blocked=10 status=429 retry-after=1` |
 | 11.5 Фонова частина | `npm run demo:contour` | `status-created=1`, потім `background-pending=1` (окремий `GET` бачить `pending`) |
@@ -319,7 +322,7 @@ API слухає `http://localhost:3000`: Swagger на `/docs`, health на `/he
 | 11.7 Health | `curl http://localhost:3000/health` | `200` зі станом БД і `uptime`; у вході для кластера `/healthz` і `/readyz` |
 | 11.7 Логи | `npm run demo:logs`; `npm run demo:contour` | `distinct-trace-ids=1 burst-uneven=0 secret-in-logs=0`; `log-request-row=1 secret-in-logs=0` на справжньому застосунку |
 | 11.7 Моніторинг | `npm run demo:metrics`; `npm run demo:trace` | `above-top-bucket=0`; `trace-matches-header=1 trace-matches-log=1`; `demo:contour` дає `metrics-route-template=1 metrics-raw-id=0` |
-| 11.7 Тести | `npm run test:unit`; `npm run test:integration` двічі; `npm run test:e2e` | 162, 59 і 43 тести, усі зелені |
+| 11.7 Тести | `npm run test:unit`; `npm run test:integration` двічі; `npm run test:e2e` | 175, 59 і 57 тестів, усі зелені |
 | 11.7 Pipeline | `npm run demo:gates`; зелений прогін у GitHub Actions | для кожного гейта `*-ok` проходить, `*-broken` падає (`types`, `contract`, `arch`, `image`) |
 
 ### OWASP Top 10:2025
@@ -335,7 +338,7 @@ API слухає `http://localhost:3000`: Swagger на `/docs`, health на `/he
 | **A05** Injection | так | Усі запити параметризовані (TypeORM або `$1`-плейсхолдери, `status IN (:...allowedFrom)`); у `src/` немає жодного `query()` зі склеюванням рядка (перевірено скриптом). Вхід проходить `ValidationPipe` із `whitelist` і `forbidNonWhitelisted`: зайве поле дає `400`. Доказ: негативні e2e-кейси, `hacker-order.json` | Автоматичного SAST немає. API віддає лише JSON, тому HTML-екранування не потрібне |
 | **A06** Insecure Design | так | Життєвий цикл замовлення за таблицею переходів, зміна статусу атомарним `UPDATE ... WHERE status IN (...)`. Інваріанти грошей і складу в одному `UPDATE ... RETURNING`. Незворотна операція захищена ідемпотентністю, подія outbox'ом. Ліміт входу закритий на відмову. Доказ: `npm run demo:race`, `npm run demo:outbox`, `test/unit/order-status.spec.ts` | Формальної моделі загроз немає; рішення й альтернативи записані в «Ключові рішення і їхня ціна» |
 | **A07** Authentication Failures | так | Access живе 600 с. Refresh з ротацією; повторне використання відкликає всю родину. Logout відкликає і refresh, і access. Ліміт входу 10 спроб за 15 хвилин на пару IP і email, 11-та дає `429`, недоступний Redis дає `503`. Для неіснуючого користувача хеш усе одно рахується (вирівнювання часу). Доказ: `npm run demo:reuse`, `npm run demo:auth` | Немає MFA і політики складності пароля; самореєстрації немає, користувачів заводить seed |
-| **A08** Software or Data Integrity Failures | частково | Образ, який зібрано, просканували й розгорнули, один і той самий (`built-digest = scanned-digest = deployed-digest`). Контракт API звіряють oasdiff і Pact. Небезпечної десеріалізації немає: приймається лише JSON. Доказ: артефакт `pipeline-evidence`, `npm run test:contract` | Образ не підписаний (cosign), без SBOM і provenance (`provenance: false`). Вебхука немає, тому цілісність вхідних подій від зовнішніх систем не перевірялася |
+| **A08** Software or Data Integrity Failures | частково | Образ, який зібрано, просканували й розгорнули, один і той самий (`built-digest = scanned-digest = deployed-digest`). Контракт API звіряють oasdiff і Pact. Небезпечної десеріалізації немає: приймається лише JSON. Вхідний вебхук платежів приймається лише з HMAC-підписом над сирими байтами й дедупом за id події. Доказ: артефакт `pipeline-evidence`, `npm run test:contract`, `npm run demo:webhook` | Образ не підписаний (cosign), без SBOM і provenance (`provenance: false`). Цілісність вхідного вебхука платежів забезпечує HMAC над сирим тілом, але в ньому один секрет без автоматичної ротації |
 | **A09** Security Logging & Alerting Failures | частково | Структурні логи pino з `trace_id` і `redact` секретів. Події безпеки пишуться окремим рядком: `[ІНЦИДЕНТ] refresh_reuse_detected`. Метрики RED і дашборд Grafana. Доказ: `npm run demo:logs` (`secret-in-logs=0`), `npm run demo:metrics` | **Alerting немає**: правил Alertmanager або сповіщень на інциденти не написано, логи не збираються в центральне сховище |
 | **A10** Mishandling of Exceptional Conditions | так | Один глобальний `ProblemExceptionFilter`: єдиний формат, без стеку й внутрішніх текстів. Збої, що мають відмовляти безпечно, відмовляють закрито (ліміт входу). Помилка кешу це промах, а не 500. Consumer підтверджує повідомлення лише після ефекту, отруєне йде в DLQ. Транзакції відкочуються цілком; retry лише на `40001`/`40P01`. у вході для кластера SIGTERM дренує запити (`src/k8s/graceful.ts`). Доказ: `npm run demo:dlq`, `npm run demo:retry`, `test/unit/problem-filter.spec.ts` | Глобальних обробників `unhandledRejection` і `uncaughtException` у коді немає |
 
@@ -359,6 +362,7 @@ API слухає `http://localhost:3000`: Swagger на `/docs`, health на `/he
 | `JWT_PREVIOUS_KID`, `JWT_PREVIOUS_PUBLIC_KEY` | ні | сховище: `secrets/jwt/<env>/previous_*` (лише під час ротації) | порожні | перекриття ключів при ротації |
 | `STORAGE_ENDPOINT`, `STORAGE_REGION`, `STORAGE_BUCKET` | `STORAGE_BUCKET` так | `.env` або дефолти `with-secrets.sh` | експорт | S3-сумісне сховище (порожній endpoint = справжній AWS S3) |
 | `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY` | так | сховище: `secrets/storage_access_key`, `secrets/storage_secret_key` | експорт | ключі сховища |
+| `PAYMENT_WEBHOOK_SECRET` | ні (без нього вебхук відповідає `503`) | сховище: `secrets/payment_webhook_secret` через `scripts/with-secrets.sh` | порожній | спільний секрет HMAC-підпису вебхука платежів, від 16 символів |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`, `PROMETHEUS_URL`, `TRACE_API_URL` | ні | дефолти `with-secrets.sh` (порти 22918, 22901, 22904) | експорт | куди йдуть трейси й звідки читають демо |
 | `GRAFANA_ADMIN_USER`, `GRAFANA_ADMIN_PASSWORD` | ні | сховище: `secrets/grafana_admin_password` | дефолти compose | вхід у Grafana |
 | `SKIP_VAULT` | ні | не задається | `1` у грейдера | `with-secrets.sh` не чіпає оточення, значення мають бути експортовані |
@@ -933,6 +937,8 @@ Provider verification (`test/contract/verify-provider.ts`) піднімає сп
     OK: усі інваріанти виконано
 
 Профіль `app` грейдер не вмикає: демо ДЗ №19–22 (`demo:publish`, `demo:dlq`, `demo:duplicate`, `demo:outbox`) вимагають, щоб на черзі не було consumer, тому після `docker compose --profile app up` виконайте перед ними `docker compose --profile app stop relay consumer`.
+
+**Вебхук платежів (курсовий).** `npm run demo:webhook` (після `npm run build` і `npm run migrate`) піднімає справжній застосунок у тому ж процесі й показує підроблений підпис, дубль і невірну суму; секрет бере зі сховища або, якщо його немає, підставляє одноразовий. Вивід і розбір у розділі «Вебхук платежів».
 
 Звено «розгортання» (ланка 10 ТЗ) демо не перевіряє: його доводять прогін конвеєра і teardown (розділи «CI/CD» і «AWS»). `POST /orders` має rate-limit (див. «Redis»), тому багаторазовий запуск демо за кілька секунд поспіль може впертися в `429`.
 
@@ -2360,6 +2366,80 @@ GitHub маскує в лозі `***` лише **точні** значення �
 
 `scripts/teardown.sh` і ключ AWS із ДЗ №31 до цього конвеєра не належать: воркфлоу нічного прибирання винесено з `.github/workflows` до `docs/teardown.workflow.yml.disabled`, бо він тримав довгоживучий ключ AWS. Прибирання вручну: `bash scripts/teardown.sh`.
 
+## Вебхук платежів (курсовий проєкт)
+
+`POST /webhooks/payments`: платіжний провайдер сам повідомляє, що замовлення оплачено. Реального еквайра в проєкті немає, тож провайдер це власний адаптер зі схемою підпису, як у Stripe. Без захисту такий ендпоінт це публічна кнопка «зарахувати оплату», тому в ньому три незалежні перевірки: підпис, дедуп і звірка суми.
+
+### Контракт
+
+Заголовок `X-Webhook-Signature: t=<unix-секунди>,v1=<hex>`, де `v1` це HMAC-SHA256 із секретом над рядком `<t>.` і сирими байтами тіла. Тіло:
+
+    {"id": "evt_1", "type": "payment.succeeded", "data": {"orderId": 12, "amountCents": 2500, "currency": "UAH"}}
+
+Ендпоінт позначено `@Public()` (JWT тут немає, стукає не користувач, автентичність дає підпис) і виключено з OpenAPI (`@ApiExcludeController`): `openapi.yaml` описує API для клієнтів, а контракт вебхука описано тут.
+
+| Ситуація | Відповідь | Чи змінилося замовлення | Запис у `payment_events` |
+|---|---|---|---|
+| Підпису немає, він зламаний, чужий, застарілий (понад 300 с) або тіло змінено | `401` (однакова відповідь на всі причини, причина лише в лозі) | ні | ні |
+| Секрет у конфігурації не заданий | `503` | ні | ні |
+| Тіло не JSON або не відповідає схемі | `400` | ні | ні |
+| Інший тип події (не `payment.succeeded`) | `200 {"status":"ignored"}` | ні | ні |
+| Замовлення не існує | `404` | ні | ні |
+| Сума або валюта не збігається із замовленням | `422` | ні | так, `amount_mismatch` |
+| Замовлення вже не можна оплатити (`paid`, `cancelled`, `shipped`…) | `409` | ні | так, `not_payable` |
+| Нова коректна подія | `200 {"status":"accepted"}` | `→ paid` | так, `applied` |
+| Той самий `id` події вдруге | `200 {"status":"duplicate"}` | ні | ні (рядок уже є) |
+
+На дубль відповідаємо `200`, а не помилкою: провайдер повторює доставку, поки не отримає `2xx`, і повтор не має його зациклити.
+
+### Чому саме так
+
+- **Підпис над сирими байтами.** `src/configure-app.ts` ставить `express.raw` на шлях `/webhooks/payments` ДО JSON-парсера Nest, тож контролер отримує `Buffer`. Після `JSON.parse` і `stringify` змінилися б пробіли й порядок ключів, і підпис не збігся б (тест `підпис над перезаписаним JSON не збігається з сирим тілом`).
+- **Порівняння в постійний час.** `crypto.timingSafeEqual` над двома буферами по 32 байти; довжину й формат (64 hex) перевіряє регулярний вираз до порівняння, бо `timingSafeEqual` на буферах різної довжини кидає виняток.
+- **Час усередині підпису.** Підпис без часу дійсний вічно: перехоплений справжній запит можна надіслати знову. Мітка `t` входить у підписаний рядок (її не підмінити), а допуск 300 с відсікає старі запити. Час перевіряється ПІСЛЯ підпису, щоб за відповіддю не можна було вгадувати, чи свіжа мітка. Допуск не замінює дедуп: у межах п'яти хвилин повтор усе одно можливий.
+- **Дедуп і ефект в одній транзакції.** Рядок замовлення береться `SELECT ... FOR UPDATE`, подія пишеться `INSERT ... ON CONFLICT (event_id) DO NOTHING`, і лише для нової та коректної події йде `UPDATE orders SET status = 'paid'`. Запис у леджер і зміна статусу комітяться разом, тож платіж не може бути «записаний, але не застосований». П'ять однакових подій одночасно дають один ефект (тест `п'ять однакових подій одночасно`).
+- **Сума звіряється із замороженою.** `orders.totalCents` і `currency` фіксуються при створенні замовлення з цін на момент покупки, а не беруться з поточного каталогу. Звірка йде ДО перевірки статусу, тому підписаний платіж на неправильну суму завжди `422`.
+- **Відхилені події теж у леджері.** Це слід того, що сталося. Повтор тієї самої відхиленої події (той самий `id`) віддає `duplicate` і не обробляється вдруге. Леджер лише додає: `UPDATE` у `payment_events` забороняє тригер (тест `леджер лише додається`); рядки зникають тільки каскадом разом із замовленням.
+- **Закрито за замовчуванням.** Секрет `PAYMENT_WEBHOOK_SECRET` необов'язковий для старту (інакше грейдер без нього не запустив би сервіс), але без нього ендпоінт відповідає `503`, а не пропускає запити без перевірки. Секрет лежить у `secrets/payment_webhook_secret` (у `.gitignore`), у процес його передає `scripts/with-secrets.sh`; `npm run bootstrap` створює файл із шаблону (шаблон це dev-значення, не секрет). Мінімальна довжина 16 символів перевіряється при старті.
+- **Подія статусу після коміту.** `PaymentWebhookService` викликає той самий `OrderEventsService.emitStatusChanged`, що й зміна статусу продавцем, але вже після коміту, щоб підписники не побачили статус, якого ще немає в БД. Окремого тесту на доставку push саме від вебхука немає.
+
+### Межі
+
+- Один секрет. Заголовок уже допускає кілька значень `v1` (ротація без простою на боці провайдера), але конфігурація приймає лише один секрет, тож ротація це заміна секрету й перезапуск.
+- На ендпоінті немає rate-limit: від зловмисника без секрету захищає підпис (дешева відмова `401`), але не від перевантаження.
+- Обробляється лише `payment.succeeded`; повернень і часткових оплат немає.
+- Подія для SSE живе в пам'яті процесу: якщо процес впаде між комітом і сповіщенням, статус у БД правильний (читається звичайним `GET /orders/:id`), а push власник не отримає.
+- Контейнер `api` збирається з `docker/Dockerfile.app`: після оновлення коду потрібен `docker compose --profile app up -d --wait --build`.
+
+### Як перевірити
+
+    npm run bootstrap          # створює secrets/payment_webhook_secret із шаблону, якщо його немає
+    npm run build && npm run migrate
+    npm run demo:webhook
+    npx jest --config jest.config.js --selectProjects unit test/unit/webhook-signature.spec.ts
+    npx jest --config jest.config.js --selectProjects e2e test/e2e/payments.webhook.e2e.spec.ts
+
+`demo:webhook` піднімає справжній застосунок у тому ж процесі, створює тимчасового користувача й два замовлення на 2500 копійок, а в кінці прибирає за собою. Якщо файлу з секретом немає, демо підставляє власний одноразовий. Вивід, 24.11.2026 (перед ним у stdout йдуть JSON-рядки логу вебхука, `ключ=число` це лише наступні рядки):
+
+    rejected-no-signature=1
+    rejected-signature=1
+    rejected-tampered=1
+    rejected-stale=1
+    status-after-forged=pending
+    accepted=1
+    duplicates=1
+    status-after-paid=paid
+    amount-mismatch=1
+    status-after-mismatch=pending
+    ledger-rows=2
+    ledger-applied=1
+    ledger-update-blocked=1
+    OK: усі інваріанти виконано
+
+Читати так: чотири підроблені запити (без підпису, чужий секрет, змінене тіло, підпис старший за 300 с) відхилено, замовлення лишилося `pending`; справжній запит `accepted` і дав `paid`; повтор дав `duplicates=1`; підписаний платіж на 1 копійку замість 2500 дав `amount-mismatch=1`, і друге замовлення лишилося `pending`; у леджері два рядки, з яких один `applied`.
+
+Тести: `test/unit/webhook-signature.spec.ts` (13 тестів: підпис, парсер, `503` без секрету) і `test/e2e/payments.webhook.e2e.spec.ts` (14 тестів проти справжнього Postgres: усі рядки таблиці відповідей вище, паралельна доставка, заборона `UPDATE`).
+
 ## Структура
 
 | Шлях                          | Призначення                                      |
@@ -2487,4 +2567,7 @@ GitHub маскує в лозі `***` лише **точні** значення �
 | `scripts/ci-vault.sh`, `scripts/ci-evidence.mjs`, `scripts/pin-actions.sh`, `scripts/setup-environments.sh` | Випадкове сховище для CI, збирання evidence, перевірка пинів, створення environments |
 | `docker/Dockerfile.app` | Образ для `docker compose --profile app` (API, relay, consumer): повний Nest-застосунок з dev-залежностями, без секретів; не production-образ |
 | `scripts/bootstrap.mjs` | `npm run bootstrap`: створює `.env`, файли-секрети з шаблонів і dev-ключі JWT, нічого не перезаписує |
+| `src/webhooks/` | Вхідний вебхук платежів: `signature.ts` (HMAC, `timingSafeEqual`, допуск часу), `payment-event.ts` (розбір події), `payment-webhook.service.ts` (транзакція: блокування замовлення, звірка суми, леджер, `paid`), контролер і модуль |
+| `src/migrations/1795000000000-PaymentEvents.ts` | Таблиця `payment_events` (`UNIQUE event_id`, `CHECK outcome`) і тригер, що забороняє `UPDATE` |
+| `src/demo-webhook.ts` | `npm run demo:webhook`: підроблений підпис, дубль і невірна сума проти справжнього застосунку |
 | `src/demo-contour.ts` | `npm run demo:contour`: наскрізний контур замовлення проти справжнього застосунку (дочірній процес) з relay і consumer |

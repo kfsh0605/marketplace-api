@@ -15,6 +15,7 @@ import { IdempotencyKeys1791400000000 } from '../../../src/migrations/1791400000
 import { AuthTables1793000000000 } from '../../../src/migrations/1793000000000-AuthTables';
 import { StoredFile } from '../../../src/entities/stored-file.entity';
 import { FilesTable1794000000000 } from '../../../src/migrations/1794000000000-FilesTable';
+import { PaymentEvents1795000000000 } from '../../../src/migrations/1795000000000-PaymentEvents';
 
 export interface PgHandle {
     container: StartedPostgreSqlContainer;
@@ -41,7 +42,8 @@ export async function startPg(label = ''): Promise<PgHandle> {
             OutboxAndProcessedMessages1791300000000,
             IdempotencyKeys1791400000000,
             AuthTables1793000000000,
-            FilesTable1794000000000
+            FilesTable1794000000000,
+            PaymentEvents1795000000000,
         ],
         synchronize: false,
     });

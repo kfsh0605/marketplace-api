@@ -24,7 +24,7 @@ if (existsSync(at('.env'))) {
     report('створено', '.env (з .env.example без DATABASE_URL і RABBITMQ_URL)');
 }
 
-for (const name of ['db_password', 'rabbitmq_password', 'storage_access_key', 'storage_secret_key', 'grafana_admin_password']) {
+for (const name of ['db_password', 'rabbitmq_password', 'storage_access_key', 'storage_secret_key', 'grafana_admin_password', 'payment_webhook_secret']) {
     const target = at('secrets', name);
     if (existsSync(target)) {
         report('є', `secrets/${name}`);

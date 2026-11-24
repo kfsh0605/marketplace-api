@@ -77,6 +77,12 @@ export STORAGE_ENDPOINT="${STORAGE_ENDPOINT:-http://127.0.0.1:22650}"
 export STORAGE_BUCKET="${STORAGE_BUCKET:-hw26-files}"
 export STORAGE_REGION="${STORAGE_REGION:-us-east-1}"
 
+# Вебхук платежів: необов'язковий секрет. Без файлу змінна лишається порожньою і ендпоінт відповідає 503
+WEBHOOK_SECRET_FILE="$ROOT/secrets/payment_webhook_secret"
+if [ -f "$WEBHOOK_SECRET_FILE" ]; then
+  export PAYMENT_WEBHOOK_SECRET="$(tr -d '\r\n' < "$WEBHOOK_SECRET_FILE")"
+fi
+
 PULUMI_PASSPHRASE_FILE="$ROOT/secrets/pulumi_passphrase"
 if [ -f "$PULUMI_PASSPHRASE_FILE" ]; then
   export PULUMI_CONFIG_PASSPHRASE="$(tr -d '\r\n' < "$PULUMI_PASSPHRASE_FILE")"
