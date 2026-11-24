@@ -1,0 +1,23 @@
+# Конфіг `npx @redocly/cli lint openapi.yaml` (шлях курсу: ДЗ №6).
+# Рекомендований набір правил, окрім одного уточнення: правило security-defined вимагає
+# описаної безпеки на кожній операції. Публічні операції (вхід, оновлення токенів, каталог, health)
+# перелічені тут явно, тож ми свідомо кажемо «ці відкриті», а не вимикаємо правило для всіх.
+extends:
+  - recommended
+
+rules:
+  security-defined:
+    severity: error
+    exceptions:
+      - path: /products
+        methods: [GET]
+      - path: /products/{productId}
+        methods: [GET]
+      - path: /products/{productId}/card
+        methods: [GET]
+      - path: /auth/login
+        methods: [POST]
+      - path: /auth/refresh
+        methods: [POST]
+      - path: /health
+        methods: [GET]
