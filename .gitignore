@@ -145,6 +145,7 @@ vite.config.ts.timestamp-*
 .idea/
 spec.json
 secrets/db_password
+secrets/payment_webhook_secret
 secrets/rabbitmq_password
 
 .npmrc

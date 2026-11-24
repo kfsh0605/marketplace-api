@@ -1,6 +1,7 @@
 import { BadRequestException, Body, Controller, Get, Headers, HttpCode, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import {
     ApiBearerAuth,
+    ApiConflictResponse,
     ApiCreatedResponse,
     ApiForbiddenResponse,
     ApiHeader,
@@ -86,6 +87,7 @@ export class OrdersController {
     @Patch(':orderId/status')
     @Roles('seller', 'admin')
     @ApiForbiddenResponse({ description: 'Змінювати статус можуть лише seller або admin' })
+    @ApiConflictResponse({ description: 'Недозволений перехід статусу (життєвий цикл замовлення, order-status.ts)' })
     @ApiOperation({ operationId: 'updateOrderStatus', summary: 'Змінити статус замовлення' })
     @ApiParam({ name: 'orderId', example: 'o-1' })
     @ApiOkResponse({ type: Order })

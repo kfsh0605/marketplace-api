@@ -127,6 +127,7 @@ paths:
       operationId: createOrder
       parameters:
         - name: idempotency-key
+          required: true
           in: header
           description: >-
             Унікальний ключ, який клієнт генерує самостійно для запобігання
@@ -134,7 +135,6 @@ paths:
             запиту (наприклад, при повторній спробі після таймауту мережі). Той
             самий ключ з тим самим тілом запиту поверне збережену раніше
             відповідь замість створення нового замовлення.
-          required: true
           schema:
             type: string
       requestBody:
@@ -210,6 +210,10 @@ paths:
           description: Немає або недійсний access-токен
         '403':
           description: Змінювати статус можуть лише seller або admin
+        '409':
+          description: >-
+            Недозволений перехід статусу (життєвий цикл замовлення,
+            order-status.ts)
       security:
         - bearer: []
       summary: Змінити статус замовлення

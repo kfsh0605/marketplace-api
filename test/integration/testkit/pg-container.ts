@@ -9,11 +9,13 @@ import { Init1788985076642 } from '../../../src/migrations/1788985076642-Init';
 import { AddProductsNameUnique1789030528991 } from '../../../src/migrations/1789030528991-AddProductsNameUnique';
 import { OrdersOrderItemsIndexes1789420020545 } from '../../../src/migrations/1789420020545-OrdersOrderItemsIndexes';
 import { CheckoutSchema1789593338925 } from '../../../src/migrations/1789593338925-CheckoutSchema';
+import { ProcessedOrderEvents1791122400000 } from '../../../src/migrations/1791122400000-ProcessedOrderEvents';
 import { OutboxAndProcessedMessages1791300000000 } from '../../../src/migrations/1791300000000-OutboxAndProcessedMessages';
 import { IdempotencyKeys1791400000000 } from '../../../src/migrations/1791400000000-IdempotencyKeys';
 import { AuthTables1793000000000 } from '../../../src/migrations/1793000000000-AuthTables';
 import { StoredFile } from '../../../src/entities/stored-file.entity';
 import { FilesTable1794000000000 } from '../../../src/migrations/1794000000000-FilesTable';
+import { PaymentEvents1795000000000 } from '../../../src/migrations/1795000000000-PaymentEvents';
 
 export interface PgHandle {
     container: StartedPostgreSqlContainer;
@@ -36,10 +38,12 @@ export async function startPg(label = ''): Promise<PgHandle> {
             AddProductsNameUnique1789030528991,
             OrdersOrderItemsIndexes1789420020545,
             CheckoutSchema1789593338925,
+            ProcessedOrderEvents1791122400000,
             OutboxAndProcessedMessages1791300000000,
             IdempotencyKeys1791400000000,
             AuthTables1793000000000,
-            FilesTable1794000000000
+            FilesTable1794000000000,
+            PaymentEvents1795000000000,
         ],
         synchronize: false,
     });

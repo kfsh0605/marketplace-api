@@ -35,6 +35,9 @@ export const envSchema = z.object({
     STORAGE_BUCKET: z.string().min(1),
     STORAGE_ACCESS_KEY: vaultString(),
     STORAGE_SECRET_KEY: vaultString(),
+    PAYMENT_WEBHOOK_SECRET: optionalVault().refine((value) => value === undefined || value.length >= 16, {
+        message: 'коротший за 16 символів: потрібен випадковий рядок',
+    }),
 });
 export type Env = z.infer<typeof envSchema>;
 
