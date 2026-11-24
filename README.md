@@ -180,6 +180,11 @@ flowchart TB
 
 API слухає `http://localhost:3000`: Swagger на `/docs`, health на `/health`. Без Docker-секретів, у режимі грейдера (`SKIP_VAULT=1`, змінні експортовані вручну), той самий порядок описано в розділі «Grading».
 
+**Перевірити контур однією командою.** `npm run demo:contour` проходить усі кроки нижче сам і друкує `ключ=значення` (докладно та з виводом: розділ «Grading», абзац «Наскрізний контур»). Перед запуском зупиніть `npm run consumer`, інакше демо відмовиться стартувати.
+
+    npm run build
+    npm run demo:contour
+
 **Перевірити контур руками.** Сидовані користувачі мають пароль `marketplace-dev-password`: `maria.bondar@example.com` (customer), `ivan.petrenko@example.com` (seller), `olena.kravchenko@example.com` (admin).
 
     # 1. Вхід: з відповіді скопіюйте accessToken у змінну TOKEN
@@ -212,7 +217,7 @@ API слухає `http://localhost:3000`: Swagger на `/docs`, health на `/he
     npm run test:integration    # Docker: Postgres 16 і Redis у Testcontainers
     npm run test:e2e
 
-Прогін 24.11.2026: unit 159, integration 59, e2e 43 тести, усі зелені. Повторний `test:integration` поспіль теж має бути зеленим: кожен файл піднімає власний контейнер, а між тестами таблиці очищає `TRUNCATE`.
+Прогін 24.11.2026: unit 162, integration 59, e2e 43 тести, усі зелені. Повторний `test:integration` поспіль теж має бути зеленим: кожен файл піднімає власний контейнер, а між тестами таблиці очищає `TRUNCATE`.
 
 **Типові збої.**
 
@@ -233,11 +238,11 @@ API слухає `http://localhost:3000`: Swagger на `/docs`, health на `/he
 | Блок і властивість | Реалізовано | Шлях | Чим замінено і чому | Де в README | Чим показати |
 |---|:---:|---|---|---|---|
 | **11.1** Домен обрано свідомо, ≥ 6/7, trade-offs, журнал | так (6/7) | власний формат | Шаблону ДЗ 0 у курсі не було, записка складена за вимогами ТЗ | «Архітектурна записка» | відкрити таблицю домену, один trade-off, журнал |
-| **11.1** Шари ≥ 3, логіка поза контролерами | так | курс (ДЗ 9, ДЗ 20) | контролер → сервіс → TypeORM-репозиторій; у логах поле `layer` | «Структура», «Observability» | `npm run demo:logs`: `layers=4` (`http`, `orders.controller`, `orders.service`, `orders.repo`) |
+| **11.1** Шари ≥ 3, логіка поза контролерами | так | курс (ДЗ 9, ДЗ 20) | контролер → сервіс → TypeORM-репозиторій; у логах поле `layer` | «Структура», «Observability» | шари видно в коді (`src/orders/`: контролер, сервіс, TypeORM-репозиторій); `npm run demo:logs` показує поле `layer` (`layers=4`) на навчальному застосунку `src/obs-app` з тим самим поділом на шари |
 | **11.1** Конфігурація окремо від коду, падає на старті | так | курс (ДЗ 7) | Zod замість Joi: схема в `src/config/env.schema.ts`, помилка називає змінну | «Конфігурація» | `npm run check:env`; прибрати `DB_HOST`, `npm run start` → код ≠ 0 і назва змінної |
 | **11.1** Схема, API-опис, runbook | так | власний формат | Mermaid у README | цей розділ | показати схему вище |
 | **11.1** (бонус) OWASP Top 10:2025 | так | власний формат | таблиця «категорія → що зроблено → межа», перелік категорій зі сторінки OWASP | «OWASP Top 10:2025» | відкрити таблицю, для 2–3 категорій назвати модуль |
-| **11.2** Контур end-to-end: створення, обробка, статус, читання | так | курс (ДЗ 10, 14, 15) | життєвий цикл із таблицею переходів; обробка фонова: consumer переводить `created → pending` | «Життєвий цикл замовлення», «Outbox» | runbook, кроки 3–6; `test/e2e/orders.ownership.e2e.spec.ts` |
+| **11.2** Контур end-to-end: створення, обробка, статус, читання | так | курс (ДЗ 10, 14, 15) | життєвий цикл із таблицею переходів; обробка фонова: consumer переводить `created → pending` | «Життєвий цикл замовлення», «Outbox» | `npm run demo:contour` (усі ланки однією командою); runbook, кроки 3–6; `test/e2e/orders.ownership.e2e.spec.ts` |
 | **11.2** Бізнес-правило під конкуренцією | так | курс (ДЗ 10) | атомарний `UPDATE ... WHERE x >= n RETURNING` | «Конкурентність» | `npm run demo:race` |
 | **11.2** Контракт API звіряє машина | так | власний (ДЗ 6) | Контракт спершу писали до коду (Express, серпень), після переходу на NestJS `openapi.yaml` генерується з коду, а розбіжності ловить машина: `gate:contract` (oasdiff) у CI і Pact-верифікація. Курсорна пагінація, `Idempotency-Key` обов'язковий, помилки в `problem+json` | «Обраний варіант», «Contract-тестування», «CI/CD» | `npx @redocly/cli lint openapi.yaml` (конфіг `redocly.yaml`); запит без `Idempotency-Key` → 400 problem+json; `npm run test:contract` |
 | **11.2** Повтор незворотної операції не дає другого ефекту | так | власний (ДЗ 15) | Ключ на краю API задає клієнт (ТЗ вимагає обов'язковий заголовок), але сервер звужує його до користувача (`<userId>:<ключ>`) і зберігає в `idempotency_keys` тією ж транзакцією. Другий рівень: `eventId` події виводиться із `orderId`, а inbox `processed_messages` відсікає дубль на споживачі. Повторна оплата того самого замовлення дає `409` (перехід `paid → paid` заборонено) | «Outbox та ідемпотентність» | `npm run demo:outbox`: `requests=2 orders=1 outbox=1 ... effect=1` |
@@ -261,10 +266,46 @@ API слухає `http://localhost:3000`: Swagger на `/docs`, health на `/he
 | **11.6** Розгортання кодом, оновлення без втрат | так | курс (ДЗ 19) | Pulumi → kind, `maxUnavailable: 0`, PDB, HPA | «Kubernetes» | `npm run demo:rollout` → `failed=0`; `npm run demo:pdb` |
 | **11.6** Розгортання поза локальною машиною | так | курс (ДЗ 21, 22) | публічного URL немає; докази: прогін конвеєра ДЗ 22 (деплой у kind у раннері, `deployed-digest = built-digest`) і стек AWS із доведеним teardown (ДЗ 21, шість перевірок порожнечі) | «CI/CD», «AWS» | посилання на прогін у GitHub Actions; артефакт `pipeline-evidence` |
 | **11.7** Health: liveness і readiness окремо | так | курс (ДЗ 2, 19) | повний Nest-застосунок має один `/health` (стан БД, uptime); `/healthz` і `/readyz` (readiness червоніє на SIGTERM) є у вході для кластера `src/k8s` | «Запуск», «Kubernetes» | `curl /health`; у кластері `/healthz`, `/readyz` |
-| **11.7** Структурні логи | так | курс (ДЗ 20) | pino + `AsyncLocalStorage`, `trace_id` у кожному рядку, `redact` секретів | «Observability» | `npm run demo:logs`: `distinct-trace-ids=1 burst-uneven=0 secret-in-logs=0` |
-| **11.7** Моніторинг | так | курс (ДЗ 20) | Prometheus, Grafana (дашборд RED у `observability/`), Jaeger як приймач OTLP | «Observability» | `npm run demo:metrics`, `npm run demo:trace` |
+| **11.7** Структурні логи | так | курс (ДЗ 20) | pino + `AsyncLocalStorage`, `trace_id` у кожному рядку, `redact` секретів | «Observability» | `npm run demo:logs`: `distinct-trace-ids=1 burst-uneven=0 secret-in-logs=0`; `npm run demo:contour` повторює перевірку на справжньому застосунку: `log-request-row=1 secret-in-logs=0` |
+| **11.7** Моніторинг | так | курс (ДЗ 20) | Prometheus, Grafana (дашборд RED у `observability/`), Jaeger як приймач OTLP | «Observability» | `npm run demo:metrics`, `npm run demo:trace`; `npm run demo:contour`: `metrics-route-template=1` |
 | **11.7** Тести | так | курс (ДЗ 12) | Testcontainers, ізоляція через `TRUNCATE`, e2e без підміни провайдерів, Pact, unit для бізнес-логіки окремо від HTTP | «Тестування» | `npm run test:unit`, `npm run test:integration` двічі, `npm run test:e2e` |
 | **11.7** Pipeline | так | курс (ДЗ 12, 22) | GitHub Actions: гейти (tsc, лінт, oasdiff, dependency-cruiser, scan, actionlint), SHA-пінування `uses:`, гейти в обидва боки, promote за digest, власний OIDC-гейт замість OIDC до AWS (SCP акаунта забороняє провайдера) | «CI/CD» | зелений прогін; `npm run demo:gates` |
+
+### Докази для рецензента: команда → очікуваний вивід
+
+Кожна команда самоочисна, друкує `ключ=число` і завершується кодом ≠ 0 при порушенні інваріанта. Для команд через `with-secrets.sh` потрібен стенд із runbook (`docker compose up -d --wait`, `npm run build`, `npm run migrate`). Рядки виводу взято з реальних прогонів, описаних у відповідних розділах README.
+
+| Блок | Команда | Ключові рядки виводу |
+|---|---|---|
+| 11.1 Конфігурація | `npm run start` без змінних зі сховища; `npm run check:env` | перший: код ≠ 0 і назва відсутньої змінної (`JWT_KID` та інші); другий: код 0 |
+| 11.1 Документація | `npx @redocly/cli lint openapi.yaml` | `Your API description is valid`, код 0 (9 попереджень) |
+| 11.2 Повний контур | `npm run demo:contour` | `create=201 background-pending=1 bad-transition=409 final-status=delivered db-status=delivered`, `OK`, код 0 |
+| 11.2 Конкурентність | `npm run demo:race` | `Спроб: 50`, `Успішних: 10`, `Фінальний stock: 0`, `Рядків із від'ємним stock: 0` |
+| 11.2 Контракт і помилки | `npm run demo:contour` | `no-idempotency-key=400 invalid-body=400 problem-json=1` |
+| 11.2 Ідемпотентність | `npm run demo:outbox` | `requests=2 orders=1 outbox=1 published=1 deliveries=1 effect=1 processed=1` |
+| 11.3 Міграції | `npm run migrate:revert && npm run migrate`; `npm run seed` двічі | обидва кроки зелені; кількість рядків після другого `seed` не змінилась |
+| 11.3 N+1 | `npm run demo:nplus1` | запитів стало 1 і воно не росте зі зростанням вибірки |
+| 11.3 Пулер і бекап | `SHOW POOLS` через PgBouncer; `bash scripts/with-secrets.sh dev bash scripts/restore-drill.sh` | `pool_mode = transaction`; відновлена копія збігається за контрольною сумою (`MATCH`) |
+| 11.3 Кеш | `npm run demo:cache` | `concurrent=50 db-calls=1 db-calls-nolock=50` |
+| 11.3 Файли | `npm run demo:upload`; `npm run demo:cdn` | `put-offline=200 commit=200 download-redirect=302`; `direct=403 edge-miss=200 edge-hit=200` |
+| 11.4 Автентифікація | `npm run demo:reuse`; `npm run demo:auth` | `r1-reuse=401 r2-after-reuse=401`; `logout=204 after-logout=401 refresh-after-logout=401` |
+| 11.4 Авторизація | `npm run demo:rbac` | `anon=401 own=200 foreign=404 role-denied=403 role-allowed=201 tampered=401` |
+| 11.4 Валідація | `npm run demo:contour` | `invalid-body=400 problem-json=1` |
+| 11.4 Секрети | `git check-ignore -v secrets/db_password`; `npm run demo:image` | правило з `.gitignore`; `token-in-history=0 token-in-config=0 token-in-layers=0` |
+| 11.4 Rate-limit | `npm run demo:ratelimit` | `allowed=5 blocked=10 status=429 retry-after=1` |
+| 11.5 Фонова частина | `npm run demo:contour` | `status-created=1`, потім `background-pending=1` (окремий `GET` бачить `pending`) |
+| 11.5 Outbox і збої | `npm run demo:crash-write`; `npm run demo:crash-relay`; `npm run demo:duplicate` | `write-failed=1 orders=0 outbox=0 deliveries=0`; `deliveries=2 applied=1 effect=1`; `deliveries=2 effect=1 skipped=1` |
+| 11.5 Брокер | `npm run demo:publish`; `npm run demo:dlq` | `published=5 delivered=5 effect=5 acked=5 dlq=0 prefetch=20`; `rejected=1 work=0 dlq=1 dlq-reason=rejected effect=0` |
+| 11.5 Воркери | `npm run demo:workers`; `npm run demo:retry` | 12 задач розподілено між 4 воркерами порівну, дублів немає; після `40001` повтор транзакції |
+| 11.5 Realtime | `node scripts/realtime-demo.mjs` | `A_RECEIVED=1`, `B_RECEIVED=0`; з `--same-room` `B_RECEIVED=1` |
+| 11.6 Інфраструктура | `docker compose up -d --wait` | усі сервіси `healthy` |
+| 11.6 Образ | `npm run demo:image`; `npm run scan` | `stages=3 shell-inside=0 runtime-uid=65532`; `gate=pass`, а `SCAN_MAX=-1 npm run scan` дає `gate=fail` і код ≠ 0 |
+| 11.6 Розгортання | `npm run demo:rollout`; `npm run demo:pdb` | `failed=0` при `requests>=5000`; `evict-1=201 evict-2=429` |
+| 11.7 Health | `curl http://localhost:3000/health` | `200` зі станом БД і `uptime`; у вході для кластера `/healthz` і `/readyz` |
+| 11.7 Логи | `npm run demo:logs`; `npm run demo:contour` | `distinct-trace-ids=1 burst-uneven=0 secret-in-logs=0`; `log-request-row=1 secret-in-logs=0` на справжньому застосунку |
+| 11.7 Моніторинг | `npm run demo:metrics`; `npm run demo:trace` | `above-top-bucket=0`; `trace-matches-header=1 trace-matches-log=1`; `demo:contour` дає `metrics-route-template=1 metrics-raw-id=0` |
+| 11.7 Тести | `npm run test:unit`; `npm run test:integration` двічі; `npm run test:e2e` | 162, 59 і 43 тести, усі зелені |
+| 11.7 Pipeline | `npm run demo:gates`; зелений прогін у GitHub Actions | для кожного гейта `*-ok` проходить, `*-broken` падає (`types`, `contract`, `arch`, `image`) |
 
 ### OWASP Top 10:2025
 
@@ -785,6 +826,7 @@ Provider verification (`test/contract/verify-provider.ts`) піднімає сп
     npm run demo:logs
     npm run demo:metrics
     npm run demo:trace
+    npm run demo:contour
 
     psql -h 127.0.0.1 -p 6432 -U marketplace -d marketplace -c "SELECT 1"
     psql -h 127.0.0.1 -p 6432 -U marketplace -d pgbouncer -c "SHOW POOLS"
@@ -835,6 +877,46 @@ Provider verification (`test/contract/verify-provider.ts`) піднімає сп
 **Observability (ДЗ №29).** Prometheus, Grafana і Jaeger піднімає та сама `docker compose up -d --wait` (healthcheck у кожного). Порти: Prometheus `22901`, Grafana `22902`, Jaeger UI й API `22904`, приймач OTLP/HTTP `22918`; усі на `127.0.0.1` у діапазоні 22900–22999. З `SKIP_VAULT=1` обгортка `with-secrets.sh` не виконується, тому `OTEL_EXPORTER_OTLP_ENDPOINT`, `PROMETHEUS_URL` і `TRACE_API_URL` грейдер експортує сам (див. команди вище). Три демо (`demo:logs`, `demo:metrics`, `demo:trace`) самі підіймають власний екземпляр застосунку на `:22911`, друкують `key=number`, самі перевіряють інваріанти й завершуються ненульовим кодом при порушенні; Postgres і секрети їм не потрібні. Перед `demo:trace` стенд має бути піднятий (він читає span-и з Jaeger). Деталі, власні числа трьох прогонів і PromQL панелей: розділ «Observability (ДЗ №29)».
 
 **CI/CD (ДЗ №32).** Блок команд ДЗ №32 (`demo:gates`, `demo:oidc`, `demo:cost`, `gate:cost`, перевірка пинів) не потребує ні кластера, ні хмари, ні токена GitHub: `demo:gates` один раз завантажує `oasdiff` (закріплений sha256) і працює з `SKIP_VAULT=1` разом з рештою, бо не читає сховище. `demo:oidc` сам генерує пару RSA й локального «видавця» і не ходить у мережу. Другий `gate:cost` має завершитися кодом `1` і `gate=fail` (перший друкує `gate=pass`). `pin-actions.sh check` потребує лише `git` і доступу до github.com. Повний конвеєр (збірка, OIDC, kind, `pulumi up`, `demo:rollout`) живе в GitHub Actions: грейдер бере перший успішний прогін на head PR і завантажує з нього артефакт `pipeline-evidence` (див. розділ «CI/CD (ДЗ №32)»). Pipeline-секрети: єдиний `GITHUB_TOKEN`; значення зі сховища застосунку CI генерує сам (`scripts/ci-vault.sh`), тож у GitHub Secrets нічого не потрібно додавати.
+
+**Наскрізний контур (курсовий).** `npm run demo:contour` піднімає справжній застосунок (`node dist/main.js`) окремим процесом на порту `22921` (змінна `CONTOUR_PORT` його змінює), а relay і consumer запускає в собі: ті самі `relayLoop` і `startOrderPlacedConsumer`, що й `npm run relay` та `npm run consumer`. Сценарій: валідація й доступ, створення, повтор із тим самим `Idempotency-Key`, фонова обробка (`created → pending`), читання окремим запитом, життєвий цикл до `delivered`, метрики й логи. Потрібні `docker compose up -d --wait`, `npm run build`, `npm run migrate` і експортовані `RABBITMQ_URL`, `REDIS_QUEUE_URL` (як у блоці вище); `npm run consumer` має бути зупинений (демо перевіряє це й завершується з поясненням). Свої дані демо створює й видаляє саме, чужі не чіпає. Вивід (`background-ms` і `trace-id` щоразу інші):
+
+    health=200
+    no-token=401
+    no-idempotency-key=400
+    invalid-body=400
+    problem-json=1
+    create=201
+    status-created=1
+    replay-header=1
+    replay-same-order=1
+    key-reuse=422
+    orders=1
+    outbox=1
+    background-pending=1
+    background-ms=241
+    foreign=404
+    role-denied=403
+    to-paid=200
+    bad-transition=409
+    bad-transition-problem=1
+    to-packed=200
+    to-shipped=200
+    to-delivered=200
+    after-terminal=409
+    final-status=delivered
+    db-status=delivered
+    published=1
+    effect=1
+    processed=1
+    metrics-route-template=1
+    metrics-raw-id=0
+    log-rows-for-trace=1
+    log-request-row=1
+    secret-in-logs=0
+    trace-id=abdf0c74bfee41b43a09d77d3a6e094a
+    OK: усі інваріанти виконано
+
+Звено «розгортання» (ланка 10 ТЗ) демо не перевіряє: його доводять прогін конвеєра і teardown (розділи «CI/CD» і «AWS»). `POST /orders` має rate-limit (див. «Redis»), тому багаторазовий запуск демо за кілька секунд поспіль може впертися в `429`.
 
 Якщо `psql` немає на машині грейдера локально — той самий `SELECT 1`/`SHOW POOLS` перевіряється зсередини вже запущеного контейнера `postgres`, який має власний psql-клієнт:
 
