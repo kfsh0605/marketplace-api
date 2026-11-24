@@ -73,6 +73,7 @@
     "demo:pdb": "node demo/pdb.mjs",
     "demo:logs": "bash scripts/with-secrets.sh dev node dist/demo-logs.js",
     "demo:trace": "bash scripts/with-secrets.sh dev node dist/demo-trace.js",
+    "demo:contour": "bash scripts/with-secrets.sh dev node dist/demo-contour.js",
     "demo:metrics": "bash scripts/with-secrets.sh dev node dist/demo-metrics.js",
     "obs:up": "bash scripts/with-secrets.sh dev docker compose up -d --wait prometheus jaeger grafana",
     "obs:down": "docker compose stop prometheus jaeger grafana",
