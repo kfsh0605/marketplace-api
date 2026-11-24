@@ -44,9 +44,9 @@ export class ProblemExceptionFilter implements ExceptionFilter {
                 const message = (res as { message?: string | string[] }).message;
                 detail = Array.isArray(message) ? message.join('; ') : (message ?? exception.message);
             }
-        } else if (exception instanceof Error) {
-            detail = exception.message;
         }
+        // Не-HTTP виняток (збій БД, баг у коді) клієнту не розкриваємо: текст помилки може містити
+        // назви таблиць, SQL або шляхи. Повна помилка лишається в логу й у спані (див. нижче).
 
         if (status >= 500) {
             log.error({ err: exception }, 'request failed');
